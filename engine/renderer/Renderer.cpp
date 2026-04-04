@@ -36,28 +36,21 @@ void Renderer::init(Window& window) {
         families.presentFamily.value()
     );
 
-    // 4. Create command pool (needed for staging buffer copies)
+    // 4. Create command pool
     m_commandPool.init(
         m_device.getDevice(),
         families.graphicsFamily.value(),
         MAX_FRAMES_IN_FLIGHT
     );
 
-    // 5. Create mesh geometry (cube with normals + UVs)
-    createGeometry();
+    // 5. Create scene (meshes, textures, objects)
+    createScene();
 
-    // 6. Create default white texture
-    m_texture.initDefault(
-        m_device.getDevice(),
-        m_device.getPhysicalDevice(),
-        m_commandPool.getPool(),
-        m_device.getGraphicsQueue()
-    );
-
-    // 7. Create uniform buffers (MVP + lighting, one per frame-in-flight)
+    // 6. Create uniform buffers (view/proj + lighting)
     createUniformBuffers();
 
-    // 8. Create descriptor sets (MVP UBO + texture sampler + lighting UBO)
+    // 7. Create descriptor sets (view/proj UBO + texture sampler + lighting UBO)
+    //    Uses the first texture for descriptors (all objects share descriptors for now)
     std::vector<VkBuffer> uboBuffers;
     std::vector<VkBuffer> lightBufs;
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -67,30 +60,96 @@ void Renderer::init(Window& window) {
     m_descriptors.init(
         m_device.getDevice(),
         MAX_FRAMES_IN_FLIGHT,
-        uboBuffers, sizeof(UniformBufferObject),
+        uboBuffers, sizeof(ViewProjUBO),
         lightBufs, sizeof(LightUBO),
-        m_texture.getImageView(),
-        m_texture.getSampler()
+        m_textures[0].getImageView(),
+        m_textures[0].getSampler()
     );
 
-    // 9. Create graphics pipeline (with vertex input + descriptors + depth)
+    // 8. Create graphics pipeline (with push constants for per-object model matrix)
     m_pipeline.init(
         m_device.getDevice(),
         m_swapchain.getRenderPass(),
         m_swapchain.getExtent(),
         "phong.vert.spv",
         "phong.frag.spv",
-        m_descriptors.getLayout()
+        m_descriptors.getLayout(),
+        sizeof(PushConstantData)
     );
 
-    // 10. Create synchronization objects
+    // 9. Create synchronization objects
     m_syncObjects.init(m_device.getDevice(), MAX_FRAMES_IN_FLIGHT, m_swapchain.getImageCount());
 
-    // 11. Capture mouse for FPS camera
+    // 10. Capture mouse for FPS camera
     window.setCursorDisabled(true);
     m_lastFrameTime = glfwGetTime();
 
     Logger::info("Renderer initialized successfully");
+}
+
+void Renderer::createScene() {
+    // --- Meshes ---
+    // Mesh 0: cube
+    MeshData cubeData = ModelLoader::createCube();
+    m_meshes.emplace_back();
+    m_meshes[0].upload(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue(),
+        cubeData.vertices, cubeData.indices
+    );
+
+    // --- Textures ---
+    // Texture 0: checkerboard
+    m_textures.emplace_back();
+    m_textures[0].initCheckerboard(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue()
+    );
+
+    // --- Scene Objects ---
+    // Center cube (spinning)
+    SceneObject center;
+    center.position      = { 0.0f, 0.0f, 0.0f };
+    center.rotationSpeed = 30.0f; // 30 degrees/sec
+    center.meshIndex     = 0;
+    center.textureIndex  = 0;
+    m_objects.push_back(center);
+
+    // Left cube (static, tilted)
+    SceneObject left;
+    left.position = { -2.5f, 0.0f, 0.0f };
+    left.rotation = { 20.0f, 45.0f, 0.0f };
+    left.meshIndex    = 0;
+    left.textureIndex = 0;
+    m_objects.push_back(left);
+
+    // Right cube (spinning other direction)
+    SceneObject right;
+    right.position      = { 2.5f, 0.0f, 0.0f };
+    right.rotationSpeed = -45.0f;
+    right.meshIndex     = 0;
+    right.textureIndex  = 0;
+    m_objects.push_back(right);
+
+    // Floor (large flat cube)
+    SceneObject floor;
+    floor.position = { 0.0f, -1.5f, 0.0f };
+    floor.scale    = { 10.0f, 0.1f, 10.0f };
+    floor.meshIndex    = 0;
+    floor.textureIndex = 0;
+    m_objects.push_back(floor);
+
+    // Small elevated cube
+    SceneObject elevated;
+    elevated.position      = { 0.0f, 2.0f, -2.0f };
+    elevated.scale         = { 0.5f, 0.5f, 0.5f };
+    elevated.rotationSpeed = 90.0f;
+    elevated.meshIndex     = 0;
+    elevated.textureIndex  = 0;
+    m_objects.push_back(elevated);
+
+    Logger::info("Scene created ({} objects, {} meshes, {} textures)",
+                 m_objects.size(), m_meshes.size(), m_textures.size());
 }
 
 void Renderer::drawFrame() {
@@ -103,6 +162,11 @@ void Renderer::drawFrame() {
 
     // Process keyboard and mouse input
     processInput(deltaTime);
+
+    // Update scene objects
+    for (auto& obj : m_objects) {
+        obj.update(deltaTime);
+    }
 
     // Wait for the previous frame using this slot to finish
     VkFence inFlightFence = m_syncObjects.getInFlightFence(m_currentFrame);
@@ -194,26 +258,18 @@ void Renderer::shutdown() {
         VulkanBuffer::destroy(m_device.getDevice(), lb);
     }
 
-    m_texture.shutdown(m_device.getDevice());
-    m_mesh.shutdown(m_device.getDevice());
+    for (auto& tex : m_textures) {
+        tex.shutdown(m_device.getDevice());
+    }
+    for (auto& mesh : m_meshes) {
+        mesh.shutdown(m_device.getDevice());
+    }
 
     m_swapchain.shutdown(m_device.getDevice());
     m_device.shutdown();
     m_instance.shutdown();
 
     Logger::info("Renderer shut down");
-}
-
-void Renderer::createGeometry() {
-    MeshData cubeData = ModelLoader::createCube();
-    m_mesh.upload(
-        m_device.getDevice(),
-        m_device.getPhysicalDevice(),
-        m_commandPool.getPool(),
-        m_device.getGraphicsQueue(),
-        cubeData.vertices,
-        cubeData.indices
-    );
 }
 
 void Renderer::createUniformBuffers() {
@@ -223,7 +279,7 @@ void Renderer::createUniformBuffers() {
         m_uniformBuffers[i] = VulkanBuffer::createUniformBuffer(
             m_device.getDevice(),
             m_device.getPhysicalDevice(),
-            sizeof(UniformBufferObject)
+            sizeof(ViewProjUBO)
         );
         m_lightBuffers[i] = VulkanBuffer::createUniformBuffer(
             m_device.getDevice(),
@@ -231,42 +287,33 @@ void Renderer::createUniformBuffers() {
             sizeof(LightUBO)
         );
     }
-    Logger::info("Uniform buffers created ({} frames, MVP + lighting)", MAX_FRAMES_IN_FLIGHT);
+    Logger::info("Uniform buffers created ({} frames, view/proj + lighting)", MAX_FRAMES_IN_FLIGHT);
 }
 
 void Renderer::updateUniformBuffer(u32 frameIndex) {
     f32 aspect = static_cast<f32>(m_swapchain.getExtent().width)
                / static_cast<f32>(m_swapchain.getExtent().height);
 
-    // MVP UBO
-    UniformBufferObject ubo{};
-
-    static f32 angle = 0.0f;
-    angle += 0.5f; // degrees per frame
-    ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
-
+    // View/Projection UBO (shared by all objects — model matrix is per-object via push constant)
+    ViewProjUBO ubo{};
     ubo.view       = m_camera.getViewMatrix();
     ubo.projection = m_camera.getProjectionMatrix(aspect);
-
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
 
     // Lighting UBO
     LightUBO light{};
-    light.lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f)); // Direction TO the light
-    light.lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);                 // White light
+    light.lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
+    light.lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);
     light.viewPos         = m_camera.getPosition();
-    light.ambientStrength = 0.1f;
-
+    light.ambientStrength = 0.15f;
     memcpy(m_lightBuffers[frameIndex].mapped, &light, sizeof(light));
 }
 
 void Renderer::processInput(f32 deltaTime) {
-    // ESC to close
     if (m_window->isKeyPressed(GLFW_KEY_ESCAPE)) {
         glfwSetWindowShouldClose(m_window->getHandle(), true);
     }
 
-    // WASD movement
     if (m_window->isKeyPressed(GLFW_KEY_W))
         m_camera.processKeyboard(CameraDirection::Forward, deltaTime);
     if (m_window->isKeyPressed(GLFW_KEY_S))
@@ -276,7 +323,6 @@ void Renderer::processInput(f32 deltaTime) {
     if (m_window->isKeyPressed(GLFW_KEY_D))
         m_camera.processKeyboard(CameraDirection::Right, deltaTime);
 
-    // Mouse look
     f32 dx, dy;
     m_window->getMouseDelta(dx, dy);
     if (dx != 0.0f || dy != 0.0f) {
@@ -292,7 +338,6 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
-    // Begin render pass — 2 clear values (color + depth)
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass  = m_swapchain.getRenderPass();
@@ -301,19 +346,16 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     renderPassInfo.renderArea.extent = m_swapchain.getExtent();
 
     VkClearValue clearValues[2]{};
-    clearValues[0].color        = {{ 0.1f, 0.1f, 0.12f, 1.0f }};
+    clearValues[0].color        = {{ 0.05f, 0.05f, 0.07f, 1.0f }};
     clearValues[1].depthStencil = { 1.0f, 0 };
     renderPassInfo.clearValueCount = 2;
     renderPassInfo.pClearValues    = clearValues;
 
     vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
 
     // Set dynamic viewport and scissor
     VkViewport viewport{};
-    viewport.x        = 0.0f;
-    viewport.y        = 0.0f;
     viewport.width    = static_cast<float>(m_swapchain.getExtent().width);
     viewport.height   = static_cast<float>(m_swapchain.getExtent().height);
     viewport.minDepth = 0.0f;
@@ -321,26 +363,34 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     VkRect2D scissor{};
-    scissor.offset = { 0, 0 };
     scissor.extent = m_swapchain.getExtent();
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Bind vertex buffer
-    VkBuffer vertexBuffers[] = { m_mesh.getVertexBuffer() };
-    VkDeviceSize offsets[]    = { 0 };
-    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-
-    // Bind index buffer (u32 now instead of u16)
-    vkCmdBindIndexBuffer(cmd, m_mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
-
-    // Bind descriptor set (uniform buffers + texture for this frame)
+    // Bind descriptor set (view/proj + texture + lighting for this frame)
     VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipeline.getPipelineLayout(), 0, 1,
                             &descriptorSet, 0, nullptr);
 
-    // Draw the mesh
-    vkCmdDrawIndexed(cmd, m_mesh.getIndexCount(), 1, 0, 0, 0);
+    // Draw each scene object
+    for (const auto& obj : m_objects) {
+        // Push the model matrix for this object
+        PushConstantData push{};
+        push.model = obj.getModelMatrix();
+        vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(PushConstantData), &push);
+
+        // Bind mesh
+        const Mesh& mesh = m_meshes[obj.meshIndex];
+        VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
+        VkDeviceSize offsets[]    = { 0 };
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+        // Draw
+        vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(cmd);
 

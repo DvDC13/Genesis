@@ -10,6 +10,7 @@
 #include "renderer/VulkanDescriptors.h"
 #include "renderer/VulkanTexture.h"
 #include "renderer/Mesh.h"
+#include "renderer/SceneObject.h"
 #include "renderer/Camera.h"
 #include "core/Types.h"
 
@@ -20,9 +21,8 @@ namespace Genesis {
 
 class Window;
 
-// Uniform buffer object — sent to the vertex shader every frame
-struct UniformBufferObject {
-    glm::mat4 model;
+// Per-frame view/projection data (shared by all objects)
+struct ViewProjUBO {
     glm::mat4 view;
     glm::mat4 projection;
 };
@@ -44,7 +44,7 @@ public:
     void shutdown();
 
 private:
-    void createGeometry();
+    void createScene();
     void createUniformBuffers();
     void updateUniformBuffer(u32 frameIndex);
     void processInput(f32 deltaTime);
@@ -60,9 +60,14 @@ private:
     VulkanCommandPool m_commandPool;
     VulkanSyncObjects m_syncObjects;
     VulkanDescriptors m_descriptors;
-    VulkanTexture     m_texture;
-    Mesh              m_mesh;
     Camera            m_camera;
+
+    // Resources (meshes and textures, referenced by SceneObjects by index)
+    std::vector<Mesh>           m_meshes;
+    std::vector<VulkanTexture>  m_textures;
+
+    // Scene objects
+    std::vector<SceneObject>    m_objects;
 
     // Uniform buffers (one per frame-in-flight)
     std::vector<BufferAllocation> m_uniformBuffers;

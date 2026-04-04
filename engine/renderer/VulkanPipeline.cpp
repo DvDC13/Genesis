@@ -9,7 +9,8 @@ namespace Genesis {
 
 void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
                           const std::string& vertPath, const std::string& fragPath,
-                          VkDescriptorSetLayout descriptorSetLayout) {
+                          VkDescriptorSetLayout descriptorSetLayout,
+                          u32 pushConstantSize) {
     auto vertCode = readFile(vertPath);
     auto fragCode = readFile(fragPath);
 
@@ -94,11 +95,20 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments    = &colorBlendAttachment;
 
-    // Pipeline layout — now includes the descriptor set layout for UBO
+    // Pipeline layout — descriptor set layout + optional push constants
+    VkPushConstantRange pushConstantRange{};
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.offset     = 0;
+    pushConstantRange.size       = pushConstantSize;
+
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
     layoutInfo.pSetLayouts    = &descriptorSetLayout;
+    if (pushConstantSize > 0) {
+        layoutInfo.pushConstantRangeCount = 1;
+        layoutInfo.pPushConstantRanges    = &pushConstantRange;
+    }
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create pipeline layout");

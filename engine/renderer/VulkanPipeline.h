@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/Types.h"
+
 #include <vulkan/vulkan.h>
 #include <string>
 #include <vector>
@@ -10,7 +12,8 @@ class VulkanPipeline {
 public:
     void init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
               const std::string& vertPath, const std::string& fragPath,
-              VkDescriptorSetLayout descriptorSetLayout);
+              VkDescriptorSetLayout descriptorSetLayout,
+              u32 pushConstantSize = 0);
     void shutdown(VkDevice device);
 
     VkPipeline       getPipeline()       const { return m_pipeline; }

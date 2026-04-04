@@ -109,6 +109,63 @@ void VulkanTexture::initDefault(VkDevice device, VkPhysicalDevice physicalDevice
     Logger::info("Default white texture created (1x1)");
 }
 
+void VulkanTexture::initCheckerboard(VkDevice device, VkPhysicalDevice physicalDevice,
+                                      VkCommandPool commandPool, VkQueue queue,
+                                      u32 size, u32 squares) {
+    m_width  = size;
+    m_height = size;
+    VkDeviceSize imageSize = size * size * 4;
+    u32 squareSize = size / squares;
+
+    // Generate checkerboard pattern
+    std::vector<uint8_t> pixels(imageSize);
+    for (u32 y = 0; y < size; y++) {
+        for (u32 x = 0; x < size; x++) {
+            bool isWhite = ((x / squareSize) + (y / squareSize)) % 2 == 0;
+            u32 idx = (y * size + x) * 4;
+            uint8_t color = isWhite ? 220 : 40;
+            pixels[idx + 0] = color;
+            pixels[idx + 1] = color;
+            pixels[idx + 2] = color;
+            pixels[idx + 3] = 255;
+        }
+    }
+
+    // Upload via staging buffer (same pattern as init/initDefault)
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+    VulkanBuffer::createBuffer(device, physicalDevice, imageSize,
+                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                               stagingBuffer, stagingMemory);
+
+    void* data;
+    vkMapMemory(device, stagingMemory, 0, imageSize, 0, &data);
+    memcpy(data, pixels.data(), static_cast<size_t>(imageSize));
+    vkUnmapMemory(device, stagingMemory);
+
+    createImage(device, physicalDevice, size, size, VK_FORMAT_R8G8B8A8_SRGB,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    transitionImageLayout(device, commandPool, queue,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    copyBufferToImage(device, commandPool, queue, stagingBuffer, size, size);
+
+    transitionImageLayout(device, commandPool, queue,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
+    createImageView(device, VK_FORMAT_R8G8B8A8_SRGB);
+    createSampler(device, physicalDevice);
+
+    Logger::info("Checkerboard texture created ({}x{}, {}x{} squares)", size, size, squares, squares);
+}
+
 void VulkanTexture::shutdown(VkDevice device) {
     if (m_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, m_sampler, nullptr);
