@@ -28,13 +28,26 @@ public:
 
     std::vector<const char*> getRequiredVulkanExtensions() const;
 
+    // Input
+    bool isKeyPressed(int key) const;
+    void setCursorDisabled(bool disabled);
+    void getMouseDelta(f32& dx, f32& dy);
+
 private:
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+    static void cursorPosCallback(GLFWwindow* window, double xpos, double ypos);
 
     GLFWwindow* m_window = nullptr;
     u32 m_width;
     u32 m_height;
     bool m_framebufferResized = false;
+
+    // Mouse tracking
+    f64 m_lastMouseX  = 0.0;
+    f64 m_lastMouseY  = 0.0;
+    f32 m_mouseDeltaX = 0.0f;
+    f32 m_mouseDeltaY = 0.0f;
+    bool m_firstMouse = true;
 };
 
 } // namespace Genesis

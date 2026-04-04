@@ -9,7 +9,8 @@ namespace Genesis {
 class VulkanPipeline {
 public:
     void init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
-              const std::string& vertPath, const std::string& fragPath);
+              const std::string& vertPath, const std::string& fragPath,
+              VkDescriptorSetLayout descriptorSetLayout);
     void shutdown(VkDevice device);
 
     VkPipeline       getPipeline()       const { return m_pipeline; }

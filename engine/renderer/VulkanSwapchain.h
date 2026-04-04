@@ -33,10 +33,12 @@ private:
     VkSurfaceFormatKHR chooseSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& formats);
     VkPresentModeKHR choosePresentMode(const std::vector<VkPresentModeKHR>& modes);
     VkExtent2D chooseExtent(const VkSurfaceCapabilitiesKHR& capabilities, u32 width, u32 height);
+    VkFormat findDepthFormat(VkPhysicalDevice physicalDevice);
 
     void createSwapchain(VkPhysicalDevice physicalDevice, VkDevice device, VkSurfaceKHR surface,
                          u32 width, u32 height, u32 graphicsFamily, u32 presentFamily);
     void createImageViews(VkDevice device);
+    void createDepthResources(VkPhysicalDevice physicalDevice, VkDevice device);
     void createRenderPass(VkDevice device);
     void createFramebuffers(VkDevice device);
     void cleanup(VkDevice device);
@@ -44,10 +46,16 @@ private:
     VkSwapchainKHR             m_swapchain  = VK_NULL_HANDLE;
     VkRenderPass               m_renderPass = VK_NULL_HANDLE;
     VkFormat                   m_imageFormat;
+    VkFormat                   m_depthFormat;
     VkExtent2D                 m_extent;
     std::vector<VkImage>       m_images;
     std::vector<VkImageView>   m_imageViews;
     std::vector<VkFramebuffer> m_framebuffers;
+
+    // Depth buffer
+    VkImage        m_depthImage       = VK_NULL_HANDLE;
+    VkDeviceMemory m_depthImageMemory = VK_NULL_HANDLE;
+    VkImageView    m_depthImageView   = VK_NULL_HANDLE;
 };
 
 } // namespace Genesis

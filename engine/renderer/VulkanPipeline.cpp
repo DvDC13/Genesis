@@ -1,4 +1,5 @@
 #include "renderer/VulkanPipeline.h"
+#include "renderer/Vertex.h"
 #include "core/Logger.h"
 
 #include <fstream>
@@ -7,15 +8,14 @@
 namespace Genesis {
 
 void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
-                          const std::string& vertPath, const std::string& fragPath) {
-    // Load compiled SPIR-V shaders
+                          const std::string& vertPath, const std::string& fragPath,
+                          VkDescriptorSetLayout descriptorSetLayout) {
     auto vertCode = readFile(vertPath);
     auto fragCode = readFile(fragPath);
 
     VkShaderModule vertModule = createShaderModule(device, vertCode);
     VkShaderModule fragModule = createShaderModule(device, fragCode);
 
-    // Shader stage create infos
     VkPipelineShaderStageCreateInfo vertStageInfo{};
     vertStageInfo.sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertStageInfo.stage  = VK_SHADER_STAGE_VERTEX_BIT;
@@ -30,16 +30,23 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
 
     VkPipelineShaderStageCreateInfo shaderStages[] = { vertStageInfo, fragStageInfo };
 
-    // Vertex input — empty for Phase 1 (vertices hardcoded in shader)
+    // Vertex input — now populated from Vertex struct
+    auto bindingDescription    = Vertex::getBindingDescription();
+    auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
-    vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertexInputInfo.vertexBindingDescriptionCount    = 1;
+    vertexInputInfo.pVertexBindingDescriptions       = &bindingDescription;
+    vertexInputInfo.vertexAttributeDescriptionCount  = static_cast<uint32_t>(attributeDescriptions.size());
+    vertexInputInfo.pVertexAttributeDescriptions     = attributeDescriptions.data();
 
     // Input assembly
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
     inputAssembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
-    // Dynamic viewport and scissor (so we don't need to recreate the pipeline on resize)
+    // Dynamic viewport and scissor
     VkDynamicState dynamicStates[] = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
@@ -60,14 +67,23 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
     rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth   = 1.0f;
     rasterizer.cullMode    = VK_CULL_MODE_BACK_BIT;
-    rasterizer.frontFace   = VK_FRONT_FACE_CLOCKWISE;
+    rasterizer.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE; // GLM uses right-handed coords
 
-    // Multisampling (disabled for now)
+    // Multisampling
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // Color blending (standard alpha blending)
+    // Depth stencil — enable depth testing
+    VkPipelineDepthStencilStateCreateInfo depthStencil{};
+    depthStencil.sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    depthStencil.depthTestEnable       = VK_TRUE;
+    depthStencil.depthWriteEnable      = VK_TRUE;
+    depthStencil.depthCompareOp        = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable = VK_FALSE;
+    depthStencil.stencilTestEnable     = VK_FALSE;
+
+    // Color blending
     VkPipelineColorBlendAttachmentState colorBlendAttachment{};
     colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT
                                         | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
@@ -78,9 +94,11 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
     colorBlending.attachmentCount = 1;
     colorBlending.pAttachments    = &colorBlendAttachment;
 
-    // Pipeline layout (empty for Phase 1 — no uniforms or push constants)
+    // Pipeline layout — now includes the descriptor set layout for UBO
     VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    layoutInfo.setLayoutCount = 1;
+    layoutInfo.pSetLayouts    = &descriptorSetLayout;
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create pipeline layout");
@@ -96,6 +114,7 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
     pipelineInfo.pViewportState      = &viewportState;
     pipelineInfo.pRasterizationState = &rasterizer;
     pipelineInfo.pMultisampleState   = &multisampling;
+    pipelineInfo.pDepthStencilState  = &depthStencil;
     pipelineInfo.pColorBlendState    = &colorBlending;
     pipelineInfo.pDynamicState       = &dynamicState;
     pipelineInfo.layout              = m_pipelineLayout;
@@ -108,7 +127,6 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
 
     Logger::info("Graphics pipeline created");
 
-    // Shader modules can be destroyed after pipeline creation
     vkDestroyShaderModule(device, fragModule, nullptr);
     vkDestroyShaderModule(device, vertModule, nullptr);
 }

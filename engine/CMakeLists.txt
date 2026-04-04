@@ -7,6 +7,9 @@ add_library(GenesisEngine STATIC
     renderer/VulkanPipeline.cpp
     renderer/VulkanCommandPool.cpp
     renderer/VulkanSyncObjects.cpp
+    renderer/VulkanBuffer.cpp
+    renderer/VulkanDescriptors.cpp
+    renderer/Camera.cpp
     renderer/Renderer.cpp
 )
 
@@ -22,6 +25,9 @@ target_link_libraries(GenesisEngine
 )
 
 # Enable validation layers in debug builds
+# GLM: use radians and Vulkan's [0,1] depth range instead of OpenGL's [-1,1]
 target_compile_definitions(GenesisEngine
     PUBLIC $<$<CONFIG:Debug>:GENESIS_DEBUG>
+    PUBLIC GLM_FORCE_RADIANS
+    PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE
 )
