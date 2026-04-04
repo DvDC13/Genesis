@@ -9,6 +9,9 @@ add_library(GenesisEngine STATIC
     renderer/VulkanSyncObjects.cpp
     renderer/VulkanBuffer.cpp
     renderer/VulkanDescriptors.cpp
+    renderer/VulkanTexture.cpp
+    renderer/Mesh.cpp
+    renderer/ModelLoader.cpp
     renderer/Camera.cpp
     renderer/Renderer.cpp
 )
@@ -18,10 +21,19 @@ target_include_directories(GenesisEngine
     PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
+# Find stb and tinyobjloader from vcpkg
+find_package(Stb REQUIRED)
+find_package(tinyobjloader CONFIG REQUIRED)
+
+target_include_directories(GenesisEngine
+    PRIVATE ${Stb_INCLUDE_DIR}
+)
+
 target_link_libraries(GenesisEngine
     PUBLIC  Vulkan::Vulkan
     PUBLIC  glfw
     PUBLIC  glm::glm
+    PRIVATE tinyobjloader::tinyobjloader
 )
 
 # Enable validation layers in debug builds

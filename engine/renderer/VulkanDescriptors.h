@@ -10,7 +10,9 @@ namespace Genesis {
 class VulkanDescriptors {
 public:
     void init(VkDevice device, u32 framesInFlight,
-              const std::vector<VkBuffer>& uniformBuffers, VkDeviceSize bufferSize);
+              const std::vector<VkBuffer>& uniformBuffers, VkDeviceSize uboSize,
+              const std::vector<VkBuffer>& lightBuffers, VkDeviceSize lightUboSize,
+              VkImageView textureImageView, VkSampler textureSampler);
     void shutdown(VkDevice device);
 
     VkDescriptorSetLayout getLayout() const { return m_layout; }

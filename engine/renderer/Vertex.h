@@ -8,7 +8,8 @@ namespace Genesis {
 
 struct Vertex {
     glm::vec3 position;
-    glm::vec3 color;
+    glm::vec3 normal;
+    glm::vec2 texCoord;
 
     static VkVertexInputBindingDescription getBindingDescription() {
         VkVertexInputBindingDescription binding{};
@@ -18,8 +19,8 @@ struct Vertex {
         return binding;
     }
 
-    static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
-        std::array<VkVertexInputAttributeDescription, 2> attrs{};
+    static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        std::array<VkVertexInputAttributeDescription, 3> attrs{};
 
         // location 0 = position (vec3)
         attrs[0].binding  = 0;
@@ -27,11 +28,17 @@ struct Vertex {
         attrs[0].format   = VK_FORMAT_R32G32B32_SFLOAT;
         attrs[0].offset   = offsetof(Vertex, position);
 
-        // location 1 = color (vec3)
+        // location 1 = normal (vec3)
         attrs[1].binding  = 0;
         attrs[1].location = 1;
         attrs[1].format   = VK_FORMAT_R32G32B32_SFLOAT;
-        attrs[1].offset   = offsetof(Vertex, color);
+        attrs[1].offset   = offsetof(Vertex, normal);
+
+        // location 2 = texCoord (vec2)
+        attrs[2].binding  = 0;
+        attrs[2].location = 2;
+        attrs[2].format   = VK_FORMAT_R32G32_SFLOAT;
+        attrs[2].offset   = offsetof(Vertex, texCoord);
 
         return attrs;
     }

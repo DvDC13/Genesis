@@ -1,5 +1,6 @@
 #include "renderer/Renderer.h"
 #include "renderer/Vertex.h"
+#include "renderer/ModelLoader.h"
 #include "platform/Window.h"
 #include "core/Logger.h"
 
@@ -42,38 +43,50 @@ void Renderer::init(Window& window) {
         MAX_FRAMES_IN_FLIGHT
     );
 
-    // 5. Create cube vertex and index buffers
-    createCubeGeometry();
+    // 5. Create mesh geometry (cube with normals + UVs)
+    createGeometry();
 
-    // 6. Create uniform buffers (one per frame-in-flight)
+    // 6. Create default white texture
+    m_texture.initDefault(
+        m_device.getDevice(),
+        m_device.getPhysicalDevice(),
+        m_commandPool.getPool(),
+        m_device.getGraphicsQueue()
+    );
+
+    // 7. Create uniform buffers (MVP + lighting, one per frame-in-flight)
     createUniformBuffers();
 
-    // 7. Create descriptor sets (binds uniform buffers to shader)
+    // 8. Create descriptor sets (MVP UBO + texture sampler + lighting UBO)
     std::vector<VkBuffer> uboBuffers;
-    for (const auto& alloc : m_uniformBuffers) {
-        uboBuffers.push_back(alloc.buffer);
+    std::vector<VkBuffer> lightBufs;
+    for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        uboBuffers.push_back(m_uniformBuffers[i].buffer);
+        lightBufs.push_back(m_lightBuffers[i].buffer);
     }
     m_descriptors.init(
         m_device.getDevice(),
         MAX_FRAMES_IN_FLIGHT,
-        uboBuffers,
-        sizeof(UniformBufferObject)
+        uboBuffers, sizeof(UniformBufferObject),
+        lightBufs, sizeof(LightUBO),
+        m_texture.getImageView(),
+        m_texture.getSampler()
     );
 
-    // 8. Create graphics pipeline (with vertex input + descriptors + depth)
+    // 9. Create graphics pipeline (with vertex input + descriptors + depth)
     m_pipeline.init(
         m_device.getDevice(),
         m_swapchain.getRenderPass(),
         m_swapchain.getExtent(),
-        "mesh.vert.spv",
-        "mesh.frag.spv",
+        "phong.vert.spv",
+        "phong.frag.spv",
         m_descriptors.getLayout()
     );
 
-    // 9. Create synchronization objects
+    // 10. Create synchronization objects
     m_syncObjects.init(m_device.getDevice(), MAX_FRAMES_IN_FLIGHT, m_swapchain.getImageCount());
 
-    // 10. Capture mouse for FPS camera
+    // 11. Capture mouse for FPS camera
     window.setCursorDisabled(true);
     m_lastFrameTime = glfwGetTime();
 
@@ -113,7 +126,7 @@ void Renderer::drawFrame() {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
 
-    // Update the uniform buffer for this frame
+    // Update uniform buffers for this frame
     updateUniformBuffer(m_currentFrame);
 
     vkResetFences(device, 1, &inFlightFence);
@@ -177,8 +190,12 @@ void Renderer::shutdown() {
     for (auto& ubo : m_uniformBuffers) {
         VulkanBuffer::destroy(m_device.getDevice(), ubo);
     }
-    VulkanBuffer::destroy(m_device.getDevice(), m_indexBuffer);
-    VulkanBuffer::destroy(m_device.getDevice(), m_vertexBuffer);
+    for (auto& lb : m_lightBuffers) {
+        VulkanBuffer::destroy(m_device.getDevice(), lb);
+    }
+
+    m_texture.shutdown(m_device.getDevice());
+    m_mesh.shutdown(m_device.getDevice());
 
     m_swapchain.shutdown(m_device.getDevice());
     m_device.shutdown();
@@ -187,98 +204,43 @@ void Renderer::shutdown() {
     Logger::info("Renderer shut down");
 }
 
-void Renderer::createCubeGeometry() {
-    // 24 vertices: 4 per face with distinct face colors
-    // Counter-clockwise winding when viewed from outside
-    std::vector<Vertex> vertices = {
-        // Front face (red)
-        {{ -0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f }},
-        {{  0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f }},
-        {{  0.5f,  0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f }},
-        {{ -0.5f,  0.5f,  0.5f }, { 1.0f, 0.0f, 0.0f }},
-
-        // Back face (green)
-        {{  0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }},
-        {{ -0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }},
-        {{ -0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }},
-        {{  0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }},
-
-        // Top face (blue)
-        {{ -0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }},
-        {{  0.5f,  0.5f,  0.5f }, { 0.0f, 0.0f, 1.0f }},
-        {{  0.5f,  0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f }},
-        {{ -0.5f,  0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f }},
-
-        // Bottom face (yellow)
-        {{ -0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 0.0f }},
-        {{  0.5f, -0.5f, -0.5f }, { 1.0f, 1.0f, 0.0f }},
-        {{  0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f, 0.0f }},
-        {{ -0.5f, -0.5f,  0.5f }, { 1.0f, 1.0f, 0.0f }},
-
-        // Right face (cyan)
-        {{  0.5f, -0.5f,  0.5f }, { 0.0f, 1.0f, 1.0f }},
-        {{  0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f, 1.0f }},
-        {{  0.5f,  0.5f, -0.5f }, { 0.0f, 1.0f, 1.0f }},
-        {{  0.5f,  0.5f,  0.5f }, { 0.0f, 1.0f, 1.0f }},
-
-        // Left face (magenta)
-        {{ -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 1.0f }},
-        {{ -0.5f, -0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f }},
-        {{ -0.5f,  0.5f,  0.5f }, { 1.0f, 0.0f, 1.0f }},
-        {{ -0.5f,  0.5f, -0.5f }, { 1.0f, 0.0f, 1.0f }},
-    };
-
-    // 36 indices: 2 triangles per face, 6 faces
-    std::vector<uint16_t> indices;
-    for (uint16_t face = 0; face < 6; face++) {
-        uint16_t base = face * 4;
-        indices.push_back(base + 0);
-        indices.push_back(base + 1);
-        indices.push_back(base + 2);
-        indices.push_back(base + 0);
-        indices.push_back(base + 2);
-        indices.push_back(base + 3);
-    }
-    m_indexCount = static_cast<u32>(indices.size());
-
-    m_vertexBuffer = VulkanBuffer::createVertexBuffer(
+void Renderer::createGeometry() {
+    MeshData cubeData = ModelLoader::createCube();
+    m_mesh.upload(
         m_device.getDevice(),
         m_device.getPhysicalDevice(),
         m_commandPool.getPool(),
         m_device.getGraphicsQueue(),
-        vertices.data(),
-        sizeof(Vertex) * vertices.size()
-    );
-
-    m_indexBuffer = VulkanBuffer::createIndexBuffer(
-        m_device.getDevice(),
-        m_device.getPhysicalDevice(),
-        m_commandPool.getPool(),
-        m_device.getGraphicsQueue(),
-        indices.data(),
-        sizeof(uint16_t) * indices.size()
+        cubeData.vertices,
+        cubeData.indices
     );
 }
 
 void Renderer::createUniformBuffers() {
     m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    m_lightBuffers.resize(MAX_FRAMES_IN_FLIGHT);
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         m_uniformBuffers[i] = VulkanBuffer::createUniformBuffer(
             m_device.getDevice(),
             m_device.getPhysicalDevice(),
             sizeof(UniformBufferObject)
         );
+        m_lightBuffers[i] = VulkanBuffer::createUniformBuffer(
+            m_device.getDevice(),
+            m_device.getPhysicalDevice(),
+            sizeof(LightUBO)
+        );
     }
-    Logger::info("Uniform buffers created ({} frames)", MAX_FRAMES_IN_FLIGHT);
+    Logger::info("Uniform buffers created ({} frames, MVP + lighting)", MAX_FRAMES_IN_FLIGHT);
 }
 
 void Renderer::updateUniformBuffer(u32 frameIndex) {
     f32 aspect = static_cast<f32>(m_swapchain.getExtent().width)
                / static_cast<f32>(m_swapchain.getExtent().height);
 
+    // MVP UBO
     UniformBufferObject ubo{};
 
-    // Slowly rotate the cube
     static f32 angle = 0.0f;
     angle += 0.5f; // degrees per frame
     ubo.model = glm::rotate(glm::mat4(1.0f), glm::radians(angle), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -287,6 +249,15 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     ubo.projection = m_camera.getProjectionMatrix(aspect);
 
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
+
+    // Lighting UBO
+    LightUBO light{};
+    light.lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f)); // Direction TO the light
+    light.lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);                 // White light
+    light.viewPos         = m_camera.getPosition();
+    light.ambientStrength = 0.1f;
+
+    memcpy(m_lightBuffers[frameIndex].mapped, &light, sizeof(light));
 }
 
 void Renderer::processInput(f32 deltaTime) {
@@ -321,7 +292,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
-    // Begin render pass — now with 2 clear values (color + depth)
+    // Begin render pass — 2 clear values (color + depth)
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass  = m_swapchain.getRenderPass();
@@ -355,21 +326,21 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     // Bind vertex buffer
-    VkBuffer vertexBuffers[] = { m_vertexBuffer.buffer };
+    VkBuffer vertexBuffers[] = { m_mesh.getVertexBuffer() };
     VkDeviceSize offsets[]    = { 0 };
     vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
 
-    // Bind index buffer
-    vkCmdBindIndexBuffer(cmd, m_indexBuffer.buffer, 0, VK_INDEX_TYPE_UINT16);
+    // Bind index buffer (u32 now instead of u16)
+    vkCmdBindIndexBuffer(cmd, m_mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-    // Bind descriptor set (uniform buffer for this frame)
+    // Bind descriptor set (uniform buffers + texture for this frame)
     VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipeline.getPipelineLayout(), 0, 1,
                             &descriptorSet, 0, nullptr);
 
-    // Draw the cube
-    vkCmdDrawIndexed(cmd, m_indexCount, 1, 0, 0, 0);
+    // Draw the mesh
+    vkCmdDrawIndexed(cmd, m_mesh.getIndexCount(), 1, 0, 0, 0);
 
     vkCmdEndRenderPass(cmd);
 

@@ -8,6 +8,8 @@
 #include "renderer/VulkanSyncObjects.h"
 #include "renderer/VulkanBuffer.h"
 #include "renderer/VulkanDescriptors.h"
+#include "renderer/VulkanTexture.h"
+#include "renderer/Mesh.h"
 #include "renderer/Camera.h"
 #include "core/Types.h"
 
@@ -25,6 +27,16 @@ struct UniformBufferObject {
     glm::mat4 projection;
 };
 
+// Lighting data — sent to the fragment shader every frame
+struct LightUBO {
+    glm::vec3 lightDir;
+    float     _pad0;
+    glm::vec3 lightColor;
+    float     _pad1;
+    glm::vec3 viewPos;
+    float     ambientStrength;
+};
+
 class Renderer {
 public:
     void init(Window& window);
@@ -32,7 +44,7 @@ public:
     void shutdown();
 
 private:
-    void createCubeGeometry();
+    void createGeometry();
     void createUniformBuffers();
     void updateUniformBuffer(u32 frameIndex);
     void processInput(f32 deltaTime);
@@ -48,15 +60,13 @@ private:
     VulkanCommandPool m_commandPool;
     VulkanSyncObjects m_syncObjects;
     VulkanDescriptors m_descriptors;
+    VulkanTexture     m_texture;
+    Mesh              m_mesh;
     Camera            m_camera;
-
-    // Geometry
-    BufferAllocation m_vertexBuffer;
-    BufferAllocation m_indexBuffer;
-    u32              m_indexCount = 0;
 
     // Uniform buffers (one per frame-in-flight)
     std::vector<BufferAllocation> m_uniformBuffers;
+    std::vector<BufferAllocation> m_lightBuffers;
 
     // Timing
     f64 m_lastFrameTime = 0.0;
