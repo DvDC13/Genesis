@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <format>
+#include <filesystem>
 
 namespace Genesis {
 
@@ -117,7 +118,10 @@ void Renderer::init(Window& window) {
         m_swapchain.getImageCount()
     );
 
-    // 11. Start in UI mode (cursor visible) — press Tab to enter camera mode
+    // 11. Scan for available OBJ models in assets/models/
+    scanAvailableModels();
+
+    // 12. Start in UI mode (cursor visible) — press Tab to enter camera mode
     window.setCursorDisabled(false);
     m_cursorCaptured = false;
     m_lastFrameTime = glfwGetTime();
@@ -136,6 +140,7 @@ void Renderer::createScene() {
         m_commandPool.getPool(), m_device.getGraphicsQueue(),
         cubeData.vertices, cubeData.indices
     );
+    m_meshNames.push_back("Cube");
 
     // 1: sphere
     MeshData sphereData = ModelLoader::createSphere(0.6f, 36, 18);
@@ -145,6 +150,7 @@ void Renderer::createScene() {
         m_commandPool.getPool(), m_device.getGraphicsQueue(),
         sphereData.vertices, sphereData.indices
     );
+    m_meshNames.push_back("Sphere");
 
     // 2: torus
     MeshData torusData = ModelLoader::createTorus(0.5f, 0.2f, 36, 24);
@@ -154,6 +160,7 @@ void Renderer::createScene() {
         m_commandPool.getPool(), m_device.getGraphicsQueue(),
         torusData.vertices, torusData.indices
     );
+    m_meshNames.push_back("Torus");
 
     // ─── Textures ───
     // 0: checkerboard
@@ -274,8 +281,15 @@ void Renderer::drawFrame() {
         totalVerts += m_meshes[obj.meshIndex].getIndexCount();
     }
     m_imguiState.vertexCount = totalVerts;
+    m_imguiState.meshNames   = m_meshNames;
 
     m_imgui.buildUI(m_imguiState, m_objects);
+
+    // Process any model load request from ImGui
+    if (m_imguiState.modelLoadRequested) {
+        processModelLoadRequest();
+        m_imguiState.modelLoadRequested = false;
+    }
 
     // Wait for the previous frame using this slot to finish
     VkFence inFlightFence = m_syncObjects.getInFlightFence(m_currentFrame);
@@ -578,6 +592,101 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("Failed to record command buffer");
     }
+}
+
+void Renderer::scanAvailableModels() {
+    namespace fs = std::filesystem;
+
+    // Look for assets/models/ relative to the executable, or a known project path
+    std::vector<std::string> searchPaths = {
+        "assets/models",
+        "../assets/models",
+        "../../assets/models",
+        "../../../assets/models",
+        "../../../../assets/models",
+    };
+
+    m_imguiState.availableModels.clear();
+
+    for (const auto& dir : searchPaths) {
+        if (!fs::exists(dir) || !fs::is_directory(dir)) continue;
+
+        for (const auto& entry : fs::directory_iterator(dir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".obj") {
+                m_imguiState.availableModels.push_back(entry.path().string());
+            }
+        }
+
+        if (!m_imguiState.availableModels.empty()) {
+            Logger::info("Found {} OBJ files in {}", m_imguiState.availableModels.size(), dir);
+            break;
+        }
+    }
+
+    if (m_imguiState.availableModels.empty()) {
+        Logger::warn("No .obj files found in assets/models/");
+    }
+}
+
+void Renderer::processModelLoadRequest() {
+    const std::string& path = m_imguiState.pendingModelPath;
+    f32 scale = m_imguiState.modelScale;
+    u32 texIdx = static_cast<u32>(m_imguiState.modelTexture);
+    if (texIdx >= m_textures.size()) texIdx = 0;
+
+    // Wait for GPU to finish before uploading new buffers
+    vkDeviceWaitIdle(m_device.getDevice());
+
+    MeshData data;
+    std::string meshName;
+
+    try {
+        if (path == "__procedural_cube__") {
+            data = ModelLoader::createCube();
+            meshName = "Cube";
+        } else if (path == "__procedural_sphere__") {
+            data = ModelLoader::createSphere(0.6f, 36, 18);
+            meshName = "Sphere";
+        } else if (path == "__procedural_torus__") {
+            data = ModelLoader::createTorus(0.5f, 0.2f, 36, 24);
+            meshName = "Torus";
+        } else {
+            data = ModelLoader::loadOBJ(path);
+            // Extract filename without extension for the name
+            namespace fs = std::filesystem;
+            meshName = fs::path(path).stem().string();
+        }
+    } catch (const std::exception& e) {
+        Logger::error("Failed to load model: {}", e.what());
+        return;
+    }
+
+    if (data.vertices.empty()) {
+        Logger::warn("Model has no vertices: {}", path);
+        return;
+    }
+
+    // Upload mesh
+    u32 meshIdx = static_cast<u32>(m_meshes.size());
+    m_meshes.emplace_back();
+    m_meshes.back().upload(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue(),
+        data.vertices, data.indices
+    );
+    m_meshNames.push_back(meshName);
+
+    // Create a new scene object at the origin
+    SceneObject obj;
+    obj.position     = { 0.0f, 0.0f, 0.0f };
+    obj.scale        = glm::vec3(scale);
+    obj.meshIndex    = meshIdx;
+    obj.textureIndex = texIdx;
+    obj.rotationSpeed = 15.0f; // gentle spin so you can see all sides
+    m_objects.push_back(obj);
+
+    Logger::info("Added {} to scene (mesh {}, {} verts, {} tris, scale {:.1f})",
+                 meshName, meshIdx, data.vertices.size(), data.indices.size() / 3, scale);
 }
 
 void Renderer::recreateSwapchain() {

@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
 #include <vector>
+#include <string>
 
 struct GLFWwindow;
 
@@ -28,9 +29,23 @@ struct ImGuiState {
     i32 selectedObject = -1;
 
     // Display toggles
-    bool showStats    = true;
-    bool showLighting = true;
-    bool showObjects  = true;
+    bool showStats      = true;
+    bool showLighting   = true;
+    bool showObjects    = true;
+    bool showModelLoader = true;
+
+    // Model loading request (set by UI, consumed by Renderer)
+    std::string pendingModelPath;
+    bool        modelLoadRequested = false;
+    f32         modelScale         = 1.0f;
+    i32         modelTexture       = 0;  // 0=checker, 1=gradient, 2=white
+
+    // Available OBJ files (populated by Renderer)
+    std::vector<std::string> availableModels;
+    i32 selectedModelIndex = 0;
+
+    // Mesh names for the object list (index → name)
+    std::vector<std::string> meshNames;
 };
 
 class ImGuiOverlay {

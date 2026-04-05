@@ -56,6 +56,8 @@ private:
     void recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex);
     void recreateSwapchain();
     void updateFPSCounter();
+    void scanAvailableModels();
+    void processModelLoadRequest();
 
     Window* m_window = nullptr;
 
@@ -74,6 +76,7 @@ private:
 
     // Resources (meshes and textures, referenced by SceneObjects by index)
     std::vector<Mesh>           m_meshes;
+    std::vector<std::string>    m_meshNames;  // Human-readable name per mesh
     std::vector<VulkanTexture>  m_textures;
 
     // Scene objects

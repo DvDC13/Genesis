@@ -128,11 +128,12 @@ void ImGuiOverlay::buildUI(ImGuiState& state, std::vector<SceneObject>& objects)
         ImGui::SetNextWindowSize(ImVec2(280, 300), ImGuiCond_FirstUseEver);
         ImGui::Begin("Objects", &state.showObjects);
 
-        // Object list
-        const char* meshNames[] = { "Cube", "Sphere", "Torus" };
-
+        // Object list — use dynamic mesh names
         for (i32 i = 0; i < static_cast<i32>(objects.size()); i++) {
-            const char* meshName = (objects[i].meshIndex < 3) ? meshNames[objects[i].meshIndex] : "Unknown";
+            const char* meshName = "Unknown";
+            if (objects[i].meshIndex < static_cast<u32>(state.meshNames.size())) {
+                meshName = state.meshNames[objects[i].meshIndex].c_str();
+            }
             std::string label = std::format("{}: {} ##obj{}", i, meshName, i);
 
             if (ImGui::Selectable(label.c_str(), state.selectedObject == i)) {
@@ -152,6 +153,78 @@ void ImGuiOverlay::buildUI(ImGuiState& state, std::vector<SceneObject>& objects)
             ImGui::DragFloat("Spin Speed", &obj.rotationSpeed, 1.0f);
         } else {
             ImGui::TextDisabled("Select an object above");
+        }
+
+        ImGui::End();
+    }
+
+    // ─── Model Loader Panel ───
+    if (state.showModelLoader) {
+        ImGui::SetNextWindowPos(ImVec2(300, 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Model Loader", &state.showModelLoader);
+
+        ImGui::Text("Load OBJ models into the scene");
+        ImGui::Separator();
+
+        // Model selector from available files
+        if (!state.availableModels.empty()) {
+            ImGui::Text("Available Models:");
+            for (i32 i = 0; i < static_cast<i32>(state.availableModels.size()); i++) {
+                if (ImGui::RadioButton(state.availableModels[i].c_str(), state.selectedModelIndex == i)) {
+                    state.selectedModelIndex = i;
+                }
+            }
+        } else {
+            ImGui::TextDisabled("No .obj files found in assets/models/");
+        }
+
+        ImGui::Separator();
+
+        // Custom path input
+        static char customPath[256] = "";
+        ImGui::InputText("Custom Path", customPath, sizeof(customPath));
+
+        ImGui::Separator();
+
+        // Settings for the loaded model
+        const char* texNames[] = { "Checkerboard", "Gradient", "White" };
+        ImGui::Combo("Texture", &state.modelTexture, texNames, 3);
+        ImGui::DragFloat("Scale", &state.modelScale, 0.05f, 0.01f, 50.0f);
+
+        ImGui::Separator();
+
+        // Load button (from list)
+        if (!state.availableModels.empty()) {
+            if (ImGui::Button("Load Selected Model", ImVec2(-1, 30))) {
+                state.pendingModelPath = state.availableModels[state.selectedModelIndex];
+                state.modelLoadRequested = true;
+            }
+        }
+
+        // Load from custom path
+        if (customPath[0] != '\0') {
+            if (ImGui::Button("Load from Custom Path", ImVec2(-1, 30))) {
+                state.pendingModelPath = customPath;
+                state.modelLoadRequested = true;
+            }
+        }
+
+        ImGui::Spacing();
+
+        // Add procedural shapes
+        ImGui::Text("Add Procedural Shape:");
+        if (ImGui::Button("Add Cube", ImVec2(-1, 0))) {
+            state.pendingModelPath = "__procedural_cube__";
+            state.modelLoadRequested = true;
+        }
+        if (ImGui::Button("Add Sphere", ImVec2(-1, 0))) {
+            state.pendingModelPath = "__procedural_sphere__";
+            state.modelLoadRequested = true;
+        }
+        if (ImGui::Button("Add Torus", ImVec2(-1, 0))) {
+            state.pendingModelPath = "__procedural_torus__";
+            state.modelLoadRequested = true;
         }
 
         ImGui::End();
