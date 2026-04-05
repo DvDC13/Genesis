@@ -166,6 +166,79 @@ void VulkanTexture::initCheckerboard(VkDevice device, VkPhysicalDevice physicalD
     Logger::info("Checkerboard texture created ({}x{}, {}x{} squares)", size, size, squares, squares);
 }
 
+void VulkanTexture::initGradient(VkDevice device, VkPhysicalDevice physicalDevice,
+                                  VkCommandPool commandPool, VkQueue queue,
+                                  u32 size) {
+    m_width  = size;
+    m_height = size;
+    VkDeviceSize imageSize = size * size * 4;
+
+    // Generate a smooth color gradient: blue→cyan→green→yellow→red across U, dark→bright across V
+    std::vector<uint8_t> pixels(imageSize);
+    for (u32 y = 0; y < size; y++) {
+        f32 v = static_cast<f32>(y) / static_cast<f32>(size - 1);
+        f32 brightness = 0.3f + 0.7f * (1.0f - v); // brighter at top
+
+        for (u32 x = 0; x < size; x++) {
+            f32 u = static_cast<f32>(x) / static_cast<f32>(size - 1);
+
+            // HSV-like hue mapping (0=red, 0.33=green, 0.66=blue)
+            f32 hue = u * 5.0f; // 5 color transitions across width
+            f32 r, g, b;
+            int sector = static_cast<int>(hue) % 6;
+            f32 frac = hue - static_cast<f32>(static_cast<int>(hue));
+
+            switch (sector) {
+                case 0: r = 1.0f; g = frac;      b = 0.0f;      break;
+                case 1: r = 1.0f - frac; g = 1.0f; b = 0.0f;    break;
+                case 2: r = 0.0f; g = 1.0f;      b = frac;      break;
+                case 3: r = 0.0f; g = 1.0f - frac; b = 1.0f;    break;
+                case 4: r = frac; g = 0.0f;      b = 1.0f;      break;
+                default: r = 1.0f; g = 0.0f;     b = 1.0f - frac; break;
+            }
+
+            u32 idx = (y * size + x) * 4;
+            pixels[idx + 0] = static_cast<uint8_t>(r * brightness * 255.0f);
+            pixels[idx + 1] = static_cast<uint8_t>(g * brightness * 255.0f);
+            pixels[idx + 2] = static_cast<uint8_t>(b * brightness * 255.0f);
+            pixels[idx + 3] = 255;
+        }
+    }
+
+    VkBuffer stagingBuffer;
+    VkDeviceMemory stagingMemory;
+    VulkanBuffer::createBuffer(device, physicalDevice, imageSize,
+                               VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+                               stagingBuffer, stagingMemory);
+
+    void* data;
+    vkMapMemory(device, stagingMemory, 0, imageSize, 0, &data);
+    memcpy(data, pixels.data(), static_cast<size_t>(imageSize));
+    vkUnmapMemory(device, stagingMemory);
+
+    createImage(device, physicalDevice, size, size, VK_FORMAT_R8G8B8A8_SRGB,
+                VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT);
+
+    transitionImageLayout(device, commandPool, queue,
+                          VK_IMAGE_LAYOUT_UNDEFINED,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    copyBufferToImage(device, commandPool, queue, stagingBuffer, size, size);
+
+    transitionImageLayout(device, commandPool, queue,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    vkDestroyBuffer(device, stagingBuffer, nullptr);
+    vkFreeMemory(device, stagingMemory, nullptr);
+
+    createImageView(device, VK_FORMAT_R8G8B8A8_SRGB);
+    createSampler(device, physicalDevice);
+
+    Logger::info("Gradient texture created ({}x{})", size, size);
+}
+
 void VulkanTexture::shutdown(VkDevice device) {
     if (m_sampler != VK_NULL_HANDLE) {
         vkDestroySampler(device, m_sampler, nullptr);

@@ -20,6 +20,10 @@ public:
                           VkCommandPool commandPool, VkQueue queue,
                           u32 size = 256, u32 squares = 8);
 
+    void initGradient(VkDevice device, VkPhysicalDevice physicalDevice,
+                      VkCommandPool commandPool, VkQueue queue,
+                      u32 size = 256);
+
     void shutdown(VkDevice device);
 
     VkImageView getImageView() const { return m_imageView; }

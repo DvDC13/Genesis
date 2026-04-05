@@ -9,11 +9,16 @@ namespace Genesis {
 void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
                               const std::vector<VkBuffer>& uniformBuffers, VkDeviceSize uboSize,
                               const std::vector<VkBuffer>& lightBuffers, VkDeviceSize lightUboSize,
-                              VkImageView textureImageView, VkSampler textureSampler) {
-    // 1. Create descriptor set layout — 3 bindings
+                              const std::vector<VkImageView>& textureViews,
+                              const std::vector<VkSampler>& textureSamplers) {
+    m_framesInFlight = framesInFlight;
+    m_textureCount   = static_cast<u32>(textureViews.size());
+    u32 totalSets    = framesInFlight * m_textureCount;
+
+    // 1. Create descriptor set layout — 3 bindings (same as before)
     std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
 
-    // Binding 0: MVP uniform buffer (vertex stage)
+    // Binding 0: view/proj uniform buffer (vertex stage)
     bindings[0].binding            = 0;
     bindings[0].descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[0].descriptorCount    = 1;
@@ -40,87 +45,90 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
         throw std::runtime_error("Failed to create descriptor set layout");
     }
 
-    // 2. Create descriptor pool — need UBO descriptors and sampler descriptors
+    // 2. Create descriptor pool — large enough for all sets
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = framesInFlight * 2; // MVP + lighting UBO per frame
+    poolSizes[0].descriptorCount = totalSets * 2; // view/proj + lighting per set
     poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = framesInFlight;
+    poolSizes[1].descriptorCount = totalSets;
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<u32>(poolSizes.size());
     poolInfo.pPoolSizes    = poolSizes.data();
-    poolInfo.maxSets       = framesInFlight;
+    poolInfo.maxSets       = totalSets;
 
     if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_pool) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create descriptor pool");
     }
 
-    // 3. Allocate descriptor sets (one per frame-in-flight)
-    std::vector<VkDescriptorSetLayout> layouts(framesInFlight, m_layout);
+    // 3. Allocate all descriptor sets
+    std::vector<VkDescriptorSetLayout> layouts(totalSets, m_layout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType              = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool     = m_pool;
-    allocInfo.descriptorSetCount = framesInFlight;
+    allocInfo.descriptorSetCount = totalSets;
     allocInfo.pSetLayouts        = layouts.data();
 
-    m_sets.resize(framesInFlight);
+    m_sets.resize(totalSets);
     if (vkAllocateDescriptorSets(device, &allocInfo, m_sets.data()) != VK_SUCCESS) {
         throw std::runtime_error("Failed to allocate descriptor sets");
     }
 
     // 4. Update each descriptor set
-    for (u32 i = 0; i < framesInFlight; i++) {
-        // Binding 0: MVP UBO
-        VkDescriptorBufferInfo mvpBufferInfo{};
-        mvpBufferInfo.buffer = uniformBuffers[i];
-        mvpBufferInfo.offset = 0;
-        mvpBufferInfo.range  = uboSize;
+    // Layout: sets[textureIndex * framesInFlight + frame]
+    for (u32 t = 0; t < m_textureCount; t++) {
+        for (u32 f = 0; f < framesInFlight; f++) {
+            u32 setIndex = t * framesInFlight + f;
 
-        // Binding 1: texture sampler
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView   = textureImageView;
-        imageInfo.sampler     = textureSampler;
+            VkDescriptorBufferInfo vpBufferInfo{};
+            vpBufferInfo.buffer = uniformBuffers[f];
+            vpBufferInfo.offset = 0;
+            vpBufferInfo.range  = uboSize;
 
-        // Binding 2: lighting UBO
-        VkDescriptorBufferInfo lightBufferInfo{};
-        lightBufferInfo.buffer = lightBuffers[i];
-        lightBufferInfo.offset = 0;
-        lightBufferInfo.range  = lightUboSize;
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView   = textureViews[t];
+            imageInfo.sampler     = textureSamplers[t];
 
-        std::array<VkWriteDescriptorSet, 3> writes{};
+            VkDescriptorBufferInfo lightBufferInfo{};
+            lightBufferInfo.buffer = lightBuffers[f];
+            lightBufferInfo.offset = 0;
+            lightBufferInfo.range  = lightUboSize;
 
-        writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[0].dstSet          = m_sets[i];
-        writes[0].dstBinding      = 0;
-        writes[0].dstArrayElement = 0;
-        writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[0].descriptorCount = 1;
-        writes[0].pBufferInfo     = &mvpBufferInfo;
+            std::array<VkWriteDescriptorSet, 3> writes{};
 
-        writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[1].dstSet          = m_sets[i];
-        writes[1].dstBinding      = 1;
-        writes[1].dstArrayElement = 0;
-        writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        writes[1].descriptorCount = 1;
-        writes[1].pImageInfo      = &imageInfo;
+            writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet          = m_sets[setIndex];
+            writes[0].dstBinding      = 0;
+            writes[0].dstArrayElement = 0;
+            writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[0].descriptorCount = 1;
+            writes[0].pBufferInfo     = &vpBufferInfo;
 
-        writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        writes[2].dstSet          = m_sets[i];
-        writes[2].dstBinding      = 2;
-        writes[2].dstArrayElement = 0;
-        writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[2].descriptorCount = 1;
-        writes[2].pBufferInfo     = &lightBufferInfo;
+            writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet          = m_sets[setIndex];
+            writes[1].dstBinding      = 1;
+            writes[1].dstArrayElement = 0;
+            writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo      = &imageInfo;
 
-        vkUpdateDescriptorSets(device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
+            writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet          = m_sets[setIndex];
+            writes[2].dstBinding      = 2;
+            writes[2].dstArrayElement = 0;
+            writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[2].descriptorCount = 1;
+            writes[2].pBufferInfo     = &lightBufferInfo;
+
+            vkUpdateDescriptorSets(device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
+        }
     }
 
-    Logger::info("Descriptors created ({} sets, 3 bindings each)", framesInFlight);
+    Logger::info("Descriptors created ({} sets: {} frames x {} textures)",
+                 totalSets, framesInFlight, m_textureCount);
 }
 
 void VulkanDescriptors::shutdown(VkDevice device) {

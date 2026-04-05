@@ -50,6 +50,7 @@ private:
     void processInput(f32 deltaTime);
     void recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex);
     void recreateSwapchain();
+    void updateFPSCounter();
 
     Window* m_window = nullptr;
 
@@ -75,6 +76,11 @@ private:
 
     // Timing
     f64 m_lastFrameTime = 0.0;
+
+    // FPS counter
+    u32 m_frameCount    = 0;
+    f64 m_fpsTimer      = 0.0;
+    f32 m_lastFPS       = 0.0f;
 
     u32 m_currentFrame = 0;
 

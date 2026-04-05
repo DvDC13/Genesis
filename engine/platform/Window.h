@@ -27,6 +27,7 @@ public:
     void resetResizedFlag() { m_framebufferResized = false; }
 
     std::vector<const char*> getRequiredVulkanExtensions() const;
+    void setTitle(const std::string& title);
 
     // Input
     bool isKeyPressed(int key) const;

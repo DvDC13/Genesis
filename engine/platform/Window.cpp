@@ -58,6 +58,10 @@ std::vector<const char*> Window::getRequiredVulkanExtensions() const {
     return { glfwExtensions, glfwExtensions + count };
 }
 
+void Window::setTitle(const std::string& title) {
+    glfwSetWindowTitle(m_window, title.c_str());
+}
+
 bool Window::isKeyPressed(int key) const {
     return glfwGetKey(m_window, key) == GLFW_PRESS;
 }

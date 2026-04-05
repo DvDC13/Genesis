@@ -4,8 +4,12 @@
 #define TINYOBJLOADER_IMPLEMENTATION
 #include <tiny_obj_loader.h>
 
+#include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
+
 #include <unordered_map>
 #include <stdexcept>
+#include <cmath>
 
 namespace Genesis {
 
@@ -143,6 +147,121 @@ MeshData ModelLoader::createCube() {
     }
 
     Logger::info("Cube mesh created (24 vertices, 36 indices)");
+    return data;
+}
+
+MeshData ModelLoader::createSphere(f32 radius, u32 sectors, u32 stacks) {
+    MeshData data;
+
+    const f32 PI = glm::pi<f32>();
+
+    // Generate vertices: loop from top pole to bottom pole
+    for (u32 i = 0; i <= stacks; i++) {
+        f32 stackAngle = PI / 2.0f - PI * static_cast<f32>(i) / static_cast<f32>(stacks); // from +90 to -90
+        f32 xy = radius * std::cos(stackAngle);
+        f32 z  = radius * std::sin(stackAngle);
+
+        for (u32 j = 0; j <= sectors; j++) {
+            f32 sectorAngle = 2.0f * PI * static_cast<f32>(j) / static_cast<f32>(sectors);
+
+            Vertex v{};
+            v.position = {
+                xy * std::cos(sectorAngle),
+                z,
+                xy * std::sin(sectorAngle)
+            };
+            // Normal = normalized position (for a sphere centered at origin)
+            v.normal = glm::normalize(v.position);
+            // UV: horizontal = sector, vertical = stack
+            v.texCoord = {
+                static_cast<f32>(j) / static_cast<f32>(sectors),
+                static_cast<f32>(i) / static_cast<f32>(stacks)
+            };
+            data.vertices.push_back(v);
+        }
+    }
+
+    // Generate indices: two triangles per quad
+    for (u32 i = 0; i < stacks; i++) {
+        u32 k1 = i * (sectors + 1);
+        u32 k2 = k1 + sectors + 1;
+
+        for (u32 j = 0; j < sectors; j++, k1++, k2++) {
+            // Top triangle (skip for the top pole)
+            if (i != 0) {
+                data.indices.push_back(k1);
+                data.indices.push_back(k2);
+                data.indices.push_back(k1 + 1);
+            }
+            // Bottom triangle (skip for the bottom pole)
+            if (i != (stacks - 1)) {
+                data.indices.push_back(k1 + 1);
+                data.indices.push_back(k2);
+                data.indices.push_back(k2 + 1);
+            }
+        }
+    }
+
+    Logger::info("Sphere mesh created ({} vertices, {} indices)",
+                 data.vertices.size(), data.indices.size());
+    return data;
+}
+
+MeshData ModelLoader::createTorus(f32 majorRadius, f32 minorRadius,
+                                   u32 majorSegments, u32 minorSegments) {
+    MeshData data;
+
+    const f32 PI = glm::pi<f32>();
+
+    // Generate vertices
+    for (u32 i = 0; i <= majorSegments; i++) {
+        f32 u = 2.0f * PI * static_cast<f32>(i) / static_cast<f32>(majorSegments);
+        f32 cosU = std::cos(u);
+        f32 sinU = std::sin(u);
+
+        for (u32 j = 0; j <= minorSegments; j++) {
+            f32 v = 2.0f * PI * static_cast<f32>(j) / static_cast<f32>(minorSegments);
+            f32 cosV = std::cos(v);
+            f32 sinV = std::sin(v);
+
+            Vertex vert{};
+            vert.position = {
+                (majorRadius + minorRadius * cosV) * cosU,
+                minorRadius * sinV,
+                (majorRadius + minorRadius * cosV) * sinU
+            };
+
+            // Normal: direction from the center of the tube ring to this point
+            glm::vec3 center = { majorRadius * cosU, 0.0f, majorRadius * sinU };
+            vert.normal = glm::normalize(vert.position - center);
+
+            vert.texCoord = {
+                static_cast<f32>(i) / static_cast<f32>(majorSegments),
+                static_cast<f32>(j) / static_cast<f32>(minorSegments)
+            };
+
+            data.vertices.push_back(vert);
+        }
+    }
+
+    // Generate indices
+    for (u32 i = 0; i < majorSegments; i++) {
+        for (u32 j = 0; j < minorSegments; j++) {
+            u32 k1 = i * (minorSegments + 1) + j;
+            u32 k2 = k1 + minorSegments + 1;
+
+            data.indices.push_back(k1);
+            data.indices.push_back(k2);
+            data.indices.push_back(k1 + 1);
+
+            data.indices.push_back(k1 + 1);
+            data.indices.push_back(k2);
+            data.indices.push_back(k2 + 1);
+        }
+    }
+
+    Logger::info("Torus mesh created ({} vertices, {} indices)",
+                 data.vertices.size(), data.indices.size());
     return data;
 }
 

@@ -11,6 +11,7 @@
 
 #include <stdexcept>
 #include <cstring>
+#include <format>
 
 namespace Genesis {
 
@@ -49,21 +50,27 @@ void Renderer::init(Window& window) {
     // 6. Create uniform buffers (view/proj + lighting)
     createUniformBuffers();
 
-    // 7. Create descriptor sets (view/proj UBO + texture sampler + lighting UBO)
-    //    Uses the first texture for descriptors (all objects share descriptors for now)
+    // 7. Create descriptor sets (one set per frame per texture)
     std::vector<VkBuffer> uboBuffers;
     std::vector<VkBuffer> lightBufs;
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         uboBuffers.push_back(m_uniformBuffers[i].buffer);
         lightBufs.push_back(m_lightBuffers[i].buffer);
     }
+
+    std::vector<VkImageView> textureViews;
+    std::vector<VkSampler>   textureSamplers;
+    for (const auto& tex : m_textures) {
+        textureViews.push_back(tex.getImageView());
+        textureSamplers.push_back(tex.getSampler());
+    }
+
     m_descriptors.init(
         m_device.getDevice(),
         MAX_FRAMES_IN_FLIGHT,
         uboBuffers, sizeof(ViewProjUBO),
         lightBufs, sizeof(LightUBO),
-        m_textures[0].getImageView(),
-        m_textures[0].getSampler()
+        textureViews, textureSamplers
     );
 
     // 8. Create graphics pipeline (with push constants for per-object model matrix)
@@ -83,13 +90,14 @@ void Renderer::init(Window& window) {
     // 10. Capture mouse for FPS camera
     window.setCursorDisabled(true);
     m_lastFrameTime = glfwGetTime();
+    m_fpsTimer      = m_lastFrameTime;
 
     Logger::info("Renderer initialized successfully");
 }
 
 void Renderer::createScene() {
-    // --- Meshes ---
-    // Mesh 0: cube
+    // ─── Meshes ───
+    // 0: cube
     MeshData cubeData = ModelLoader::createCube();
     m_meshes.emplace_back();
     m_meshes[0].upload(
@@ -98,55 +106,105 @@ void Renderer::createScene() {
         cubeData.vertices, cubeData.indices
     );
 
-    // --- Textures ---
-    // Texture 0: checkerboard
+    // 1: sphere
+    MeshData sphereData = ModelLoader::createSphere(0.6f, 36, 18);
+    m_meshes.emplace_back();
+    m_meshes[1].upload(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue(),
+        sphereData.vertices, sphereData.indices
+    );
+
+    // 2: torus
+    MeshData torusData = ModelLoader::createTorus(0.5f, 0.2f, 36, 24);
+    m_meshes.emplace_back();
+    m_meshes[2].upload(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue(),
+        torusData.vertices, torusData.indices
+    );
+
+    // ─── Textures ───
+    // 0: checkerboard
     m_textures.emplace_back();
     m_textures[0].initCheckerboard(
         m_device.getDevice(), m_device.getPhysicalDevice(),
         m_commandPool.getPool(), m_device.getGraphicsQueue()
     );
 
-    // --- Scene Objects ---
-    // Center cube (spinning)
-    SceneObject center;
-    center.position      = { 0.0f, 0.0f, 0.0f };
-    center.rotationSpeed = 30.0f; // 30 degrees/sec
-    center.meshIndex     = 0;
-    center.textureIndex  = 0;
-    m_objects.push_back(center);
+    // 1: color gradient
+    m_textures.emplace_back();
+    m_textures[1].initGradient(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue()
+    );
 
-    // Left cube (static, tilted)
-    SceneObject left;
-    left.position = { -2.5f, 0.0f, 0.0f };
-    left.rotation = { 20.0f, 45.0f, 0.0f };
-    left.meshIndex    = 0;
-    left.textureIndex = 0;
-    m_objects.push_back(left);
+    // 2: white (for clean Phong-only look)
+    m_textures.emplace_back();
+    m_textures[2].initDefault(
+        m_device.getDevice(), m_device.getPhysicalDevice(),
+        m_commandPool.getPool(), m_device.getGraphicsQueue()
+    );
 
-    // Right cube (spinning other direction)
-    SceneObject right;
-    right.position      = { 2.5f, 0.0f, 0.0f };
-    right.rotationSpeed = -45.0f;
-    right.meshIndex     = 0;
-    right.textureIndex  = 0;
-    m_objects.push_back(right);
+    // ─── Scene Objects ───
 
-    // Floor (large flat cube)
+    // Center: spinning checkerboard cube
+    SceneObject centerCube;
+    centerCube.position      = { 0.0f, 0.0f, 0.0f };
+    centerCube.rotationSpeed = 30.0f;
+    centerCube.meshIndex     = 0; // cube
+    centerCube.textureIndex  = 0; // checkerboard
+    m_objects.push_back(centerCube);
+
+    // Left: rainbow sphere
+    SceneObject sphere;
+    sphere.position      = { -2.5f, 0.0f, 0.0f };
+    sphere.rotationSpeed = 15.0f;
+    sphere.meshIndex     = 1; // sphere
+    sphere.textureIndex  = 1; // gradient
+    m_objects.push_back(sphere);
+
+    // Right: white torus spinning
+    SceneObject torus;
+    torus.position      = { 2.5f, 0.0f, 0.0f };
+    torus.rotation       = { 30.0f, 0.0f, 0.0f };
+    torus.rotationSpeed = -40.0f;
+    torus.meshIndex     = 2; // torus
+    torus.textureIndex  = 2; // white
+    m_objects.push_back(torus);
+
+    // Floor: large flat checkerboard cube
     SceneObject floor;
-    floor.position = { 0.0f, -1.5f, 0.0f };
-    floor.scale    = { 10.0f, 0.1f, 10.0f };
-    floor.meshIndex    = 0;
-    floor.textureIndex = 0;
+    floor.position     = { 0.0f, -1.5f, 0.0f };
+    floor.scale        = { 12.0f, 0.1f, 12.0f };
+    floor.meshIndex    = 0; // cube
+    floor.textureIndex = 0; // checkerboard
     m_objects.push_back(floor);
 
-    // Small elevated cube
-    SceneObject elevated;
-    elevated.position      = { 0.0f, 2.0f, -2.0f };
-    elevated.scale         = { 0.5f, 0.5f, 0.5f };
-    elevated.rotationSpeed = 90.0f;
-    elevated.meshIndex     = 0;
-    elevated.textureIndex  = 0;
-    m_objects.push_back(elevated);
+    // Back-left: small gradient cube
+    SceneObject backCube;
+    backCube.position      = { -1.5f, 1.0f, -2.0f };
+    backCube.scale         = { 0.6f, 0.6f, 0.6f };
+    backCube.rotationSpeed = 60.0f;
+    backCube.meshIndex     = 0; // cube
+    backCube.textureIndex  = 1; // gradient
+    m_objects.push_back(backCube);
+
+    // Back-right: white sphere
+    SceneObject whiteSphere;
+    whiteSphere.position     = { 1.5f, 0.8f, -2.0f };
+    whiteSphere.meshIndex    = 1; // sphere
+    whiteSphere.textureIndex = 2; // white
+    m_objects.push_back(whiteSphere);
+
+    // Far: gradient torus floating
+    SceneObject farTorus;
+    farTorus.position      = { 0.0f, 1.5f, -3.5f };
+    farTorus.rotation       = { 45.0f, 0.0f, 0.0f };
+    farTorus.rotationSpeed = 25.0f;
+    farTorus.meshIndex     = 2; // torus
+    farTorus.textureIndex  = 1; // gradient
+    m_objects.push_back(farTorus);
 
     Logger::info("Scene created ({} objects, {} meshes, {} textures)",
                  m_objects.size(), m_meshes.size(), m_textures.size());
@@ -167,6 +225,9 @@ void Renderer::drawFrame() {
     for (auto& obj : m_objects) {
         obj.update(deltaTime);
     }
+
+    // FPS counter
+    updateFPSCounter();
 
     // Wait for the previous frame using this slot to finish
     VkFence inFlightFence = m_syncObjects.getInFlightFence(m_currentFrame);
@@ -294,13 +355,11 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     f32 aspect = static_cast<f32>(m_swapchain.getExtent().width)
                / static_cast<f32>(m_swapchain.getExtent().height);
 
-    // View/Projection UBO (shared by all objects — model matrix is per-object via push constant)
     ViewProjUBO ubo{};
     ubo.view       = m_camera.getViewMatrix();
     ubo.projection = m_camera.getProjectionMatrix(aspect);
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
 
-    // Lighting UBO
     LightUBO light{};
     light.lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
     light.lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);
@@ -330,6 +389,22 @@ void Renderer::processInput(f32 deltaTime) {
     }
 }
 
+void Renderer::updateFPSCounter() {
+    m_frameCount++;
+    f64 currentTime = glfwGetTime();
+    f64 elapsed = currentTime - m_fpsTimer;
+
+    if (elapsed >= 0.5) { // Update twice per second
+        m_lastFPS  = static_cast<f32>(m_frameCount / elapsed);
+        m_frameCount = 0;
+        m_fpsTimer   = currentTime;
+
+        std::string title = std::format("Genesis Engine | {:.0f} FPS | {} objects",
+                                        m_lastFPS, m_objects.size());
+        m_window->setTitle(title);
+    }
+}
+
 void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -346,7 +421,7 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     renderPassInfo.renderArea.extent = m_swapchain.getExtent();
 
     VkClearValue clearValues[2]{};
-    clearValues[0].color        = {{ 0.05f, 0.05f, 0.07f, 1.0f }};
+    clearValues[0].color        = {{ 0.02f, 0.02f, 0.04f, 1.0f }};
     clearValues[1].depthStencil = { 1.0f, 0 };
     renderPassInfo.clearValueCount = 2;
     renderPassInfo.pClearValues    = clearValues;
@@ -366,14 +441,14 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     scissor.extent = m_swapchain.getExtent();
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Bind descriptor set (view/proj + texture + lighting for this frame)
-    VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            m_pipeline.getPipelineLayout(), 0, 1,
-                            &descriptorSet, 0, nullptr);
-
-    // Draw each scene object
+    // Draw each scene object with its own texture
     for (const auto& obj : m_objects) {
+        // Bind the descriptor set for this object's texture
+        VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                m_pipeline.getPipelineLayout(), 0, 1,
+                                &descriptorSet, 0, nullptr);
+
         // Push the model matrix for this object
         PushConstantData push{};
         push.model = obj.getModelMatrix();

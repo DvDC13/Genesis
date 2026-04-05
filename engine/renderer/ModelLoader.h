@@ -19,6 +19,13 @@ public:
 
     // Generate a textured cube with normals and UVs
     static MeshData createCube();
+
+    // Generate a UV sphere (stacks = horizontal rings, sectors = vertical slices)
+    static MeshData createSphere(f32 radius = 0.5f, u32 sectors = 36, u32 stacks = 18);
+
+    // Generate a torus (ring shape)
+    static MeshData createTorus(f32 majorRadius = 0.5f, f32 minorRadius = 0.2f,
+                                u32 majorSegments = 36, u32 minorSegments = 24);
 };
 
 } // namespace Genesis
