@@ -12,10 +12,12 @@
 #include "renderer/Mesh.h"
 #include "renderer/SceneObject.h"
 #include "renderer/Camera.h"
+#include "ui/ImGuiOverlay.h"
 #include "core/Types.h"
 
 #include <glm/glm.hpp>
 #include <vector>
+#include <string>
 
 namespace Genesis {
 
@@ -62,6 +64,8 @@ private:
     VulkanSyncObjects m_syncObjects;
     VulkanDescriptors m_descriptors;
     Camera            m_camera;
+    ImGuiOverlay      m_imgui;
+    ImGuiState        m_imguiState;
 
     // Resources (meshes and textures, referenced by SceneObjects by index)
     std::vector<Mesh>           m_meshes;
@@ -81,6 +85,12 @@ private:
     u32 m_frameCount    = 0;
     f64 m_fpsTimer      = 0.0;
     f32 m_lastFPS       = 0.0f;
+
+    // Cursor state (Tab to toggle)
+    bool m_cursorCaptured = true;
+
+    // GPU name for stats display
+    std::string m_gpuName;
 
     u32 m_currentFrame = 0;
 

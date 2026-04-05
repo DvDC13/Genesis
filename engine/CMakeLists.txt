@@ -14,6 +14,7 @@ add_library(GenesisEngine STATIC
     renderer/ModelLoader.cpp
     renderer/Camera.cpp
     renderer/Renderer.cpp
+    ui/ImGuiOverlay.cpp
 )
 
 target_include_directories(GenesisEngine
@@ -24,6 +25,7 @@ target_include_directories(GenesisEngine
 # Find stb and tinyobjloader from vcpkg
 find_package(Stb REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 target_include_directories(GenesisEngine
     PRIVATE ${Stb_INCLUDE_DIR}
@@ -34,6 +36,7 @@ target_link_libraries(GenesisEngine
     PUBLIC  glfw
     PUBLIC  glm::glm
     PRIVATE tinyobjloader::tinyobjloader
+    PUBLIC  imgui::imgui
 )
 
 # Enable validation layers in debug builds

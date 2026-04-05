@@ -25,6 +25,11 @@ void Renderer::init(Window& window) {
     // 2. Pick physical device and create logical device
     m_device.init(m_instance.getInstance(), m_instance.getSurface());
 
+    // Store GPU name for stats
+    VkPhysicalDeviceProperties gpuProps;
+    vkGetPhysicalDeviceProperties(m_device.getPhysicalDevice(), &gpuProps);
+    m_gpuName = gpuProps.deviceName;
+
     // 3. Create swapchain, image views, depth buffer, render pass, framebuffers
     auto families = m_device.getQueueFamilies();
     m_swapchain.init(
@@ -87,8 +92,21 @@ void Renderer::init(Window& window) {
     // 9. Create synchronization objects
     m_syncObjects.init(m_device.getDevice(), MAX_FRAMES_IN_FLIGHT, m_swapchain.getImageCount());
 
-    // 10. Capture mouse for FPS camera
-    window.setCursorDisabled(true);
+    // 10. Initialize ImGui overlay
+    m_imgui.init(
+        window.getHandle(),
+        m_instance.getInstance(),
+        m_device.getPhysicalDevice(),
+        m_device.getDevice(),
+        families.graphicsFamily.value(),
+        m_device.getGraphicsQueue(),
+        m_swapchain.getRenderPass(),
+        m_swapchain.getImageCount()
+    );
+
+    // 11. Start in UI mode (cursor visible) — press Tab to enter camera mode
+    window.setCursorDisabled(false);
+    m_cursorCaptured = false;
     m_lastFrameTime = glfwGetTime();
     m_fpsTimer      = m_lastFrameTime;
 
@@ -152,16 +170,16 @@ void Renderer::createScene() {
     SceneObject centerCube;
     centerCube.position      = { 0.0f, 0.0f, 0.0f };
     centerCube.rotationSpeed = 30.0f;
-    centerCube.meshIndex     = 0; // cube
-    centerCube.textureIndex  = 0; // checkerboard
+    centerCube.meshIndex     = 0;
+    centerCube.textureIndex  = 0;
     m_objects.push_back(centerCube);
 
     // Left: rainbow sphere
     SceneObject sphere;
     sphere.position      = { -2.5f, 0.0f, 0.0f };
     sphere.rotationSpeed = 15.0f;
-    sphere.meshIndex     = 1; // sphere
-    sphere.textureIndex  = 1; // gradient
+    sphere.meshIndex     = 1;
+    sphere.textureIndex  = 1;
     m_objects.push_back(sphere);
 
     // Right: white torus spinning
@@ -169,16 +187,16 @@ void Renderer::createScene() {
     torus.position      = { 2.5f, 0.0f, 0.0f };
     torus.rotation       = { 30.0f, 0.0f, 0.0f };
     torus.rotationSpeed = -40.0f;
-    torus.meshIndex     = 2; // torus
-    torus.textureIndex  = 2; // white
+    torus.meshIndex     = 2;
+    torus.textureIndex  = 2;
     m_objects.push_back(torus);
 
     // Floor: large flat checkerboard cube
     SceneObject floor;
     floor.position     = { 0.0f, -1.5f, 0.0f };
     floor.scale        = { 12.0f, 0.1f, 12.0f };
-    floor.meshIndex    = 0; // cube
-    floor.textureIndex = 0; // checkerboard
+    floor.meshIndex    = 0;
+    floor.textureIndex = 0;
     m_objects.push_back(floor);
 
     // Back-left: small gradient cube
@@ -186,15 +204,15 @@ void Renderer::createScene() {
     backCube.position      = { -1.5f, 1.0f, -2.0f };
     backCube.scale         = { 0.6f, 0.6f, 0.6f };
     backCube.rotationSpeed = 60.0f;
-    backCube.meshIndex     = 0; // cube
-    backCube.textureIndex  = 1; // gradient
+    backCube.meshIndex     = 0;
+    backCube.textureIndex  = 1;
     m_objects.push_back(backCube);
 
     // Back-right: white sphere
     SceneObject whiteSphere;
     whiteSphere.position     = { 1.5f, 0.8f, -2.0f };
-    whiteSphere.meshIndex    = 1; // sphere
-    whiteSphere.textureIndex = 2; // white
+    whiteSphere.meshIndex    = 1;
+    whiteSphere.textureIndex = 2;
     m_objects.push_back(whiteSphere);
 
     // Far: gradient torus floating
@@ -202,8 +220,8 @@ void Renderer::createScene() {
     farTorus.position      = { 0.0f, 1.5f, -3.5f };
     farTorus.rotation       = { 45.0f, 0.0f, 0.0f };
     farTorus.rotationSpeed = 25.0f;
-    farTorus.meshIndex     = 2; // torus
-    farTorus.textureIndex  = 1; // gradient
+    farTorus.meshIndex     = 2;
+    farTorus.textureIndex  = 1;
     m_objects.push_back(farTorus);
 
     Logger::info("Scene created ({} objects, {} meshes, {} textures)",
@@ -229,6 +247,23 @@ void Renderer::drawFrame() {
     // FPS counter
     updateFPSCounter();
 
+    // ─── ImGui frame ───
+    m_imgui.newFrame();
+
+    // Feed stats to ImGui
+    m_imguiState.fps         = m_lastFPS;
+    m_imguiState.gpuName     = m_gpuName.c_str();
+    m_imguiState.objectCount = static_cast<u32>(m_objects.size());
+    m_imguiState.drawCalls   = static_cast<u32>(m_objects.size());
+
+    u32 totalVerts = 0;
+    for (const auto& obj : m_objects) {
+        totalVerts += m_meshes[obj.meshIndex].getIndexCount();
+    }
+    m_imguiState.vertexCount = totalVerts;
+
+    m_imgui.buildUI(m_imguiState, m_objects);
+
     // Wait for the previous frame using this slot to finish
     VkFence inFlightFence = m_syncObjects.getInFlightFence(m_currentFrame);
     vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
@@ -251,7 +286,7 @@ void Renderer::drawFrame() {
         throw std::runtime_error("Failed to acquire swapchain image");
     }
 
-    // Update uniform buffers for this frame
+    // Update uniform buffers — use ImGui state for lighting
     updateUniformBuffer(m_currentFrame);
 
     vkResetFences(device, 1, &inFlightFence);
@@ -307,6 +342,7 @@ void Renderer::drawFrame() {
 void Renderer::shutdown() {
     vkDeviceWaitIdle(m_device.getDevice());
 
+    m_imgui.shutdown(m_device.getDevice());
     m_syncObjects.shutdown(m_device.getDevice());
     m_commandPool.shutdown(m_device.getDevice());
     m_pipeline.shutdown(m_device.getDevice());
@@ -360,11 +396,12 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     ubo.projection = m_camera.getProjectionMatrix(aspect);
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
 
+    // Use ImGui-controlled lighting values
     LightUBO light{};
-    light.lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
-    light.lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);
+    light.lightDir        = m_imguiState.lightDir;
+    light.lightColor      = m_imguiState.lightColor;
     light.viewPos         = m_camera.getPosition();
-    light.ambientStrength = 0.15f;
+    light.ambientStrength = m_imguiState.ambientStrength;
     memcpy(m_lightBuffers[frameIndex].mapped, &light, sizeof(light));
 }
 
@@ -372,6 +409,18 @@ void Renderer::processInput(f32 deltaTime) {
     if (m_window->isKeyPressed(GLFW_KEY_ESCAPE)) {
         glfwSetWindowShouldClose(m_window->getHandle(), true);
     }
+
+    // Tab toggles cursor capture (camera vs UI mode)
+    static bool tabWasPressed = false;
+    bool tabPressed = m_window->isKeyPressed(GLFW_KEY_TAB);
+    if (tabPressed && !tabWasPressed) {
+        m_cursorCaptured = !m_cursorCaptured;
+        m_window->setCursorDisabled(m_cursorCaptured);
+    }
+    tabWasPressed = tabPressed;
+
+    // Only process camera input when cursor is captured
+    if (!m_cursorCaptured) return;
 
     if (m_window->isKeyPressed(GLFW_KEY_W))
         m_camera.processKeyboard(CameraDirection::Forward, deltaTime);
@@ -394,8 +443,8 @@ void Renderer::updateFPSCounter() {
     f64 currentTime = glfwGetTime();
     f64 elapsed = currentTime - m_fpsTimer;
 
-    if (elapsed >= 0.5) { // Update twice per second
-        m_lastFPS  = static_cast<f32>(m_frameCount / elapsed);
+    if (elapsed >= 0.5) {
+        m_lastFPS    = static_cast<f32>(m_frameCount / elapsed);
         m_frameCount = 0;
         m_fpsTimer   = currentTime;
 
@@ -443,29 +492,28 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
 
     // Draw each scene object with its own texture
     for (const auto& obj : m_objects) {
-        // Bind the descriptor set for this object's texture
         VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                 m_pipeline.getPipelineLayout(), 0, 1,
                                 &descriptorSet, 0, nullptr);
 
-        // Push the model matrix for this object
         PushConstantData push{};
         push.model = obj.getModelMatrix();
         vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0,
                            sizeof(PushConstantData), &push);
 
-        // Bind mesh
         const Mesh& mesh = m_meshes[obj.meshIndex];
         VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
         VkDeviceSize offsets[]    = { 0 };
         vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
         vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
 
-        // Draw
         vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
     }
+
+    // Draw ImGui on top of the 3D scene (same render pass)
+    m_imgui.render(cmd);
 
     vkCmdEndRenderPass(cmd);
 

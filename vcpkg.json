@@ -5,6 +5,10 @@
     "glfw3",
     "glm",
     "stb",
-    "tinyobjloader"
+    "tinyobjloader",
+    {
+      "name": "imgui",
+      "features": ["glfw-binding", "vulkan-binding", "docking-experimental"]
+    }
   ]
 }
