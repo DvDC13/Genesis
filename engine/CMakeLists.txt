@@ -14,6 +14,7 @@ add_library(GenesisEngine STATIC
     renderer/ModelLoader.cpp
     renderer/Camera.cpp
     renderer/Skybox.cpp
+    renderer/ShadowMap.cpp
     renderer/Renderer.cpp
     ui/ImGuiOverlay.cpp
 )

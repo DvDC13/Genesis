@@ -10,13 +10,14 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
                               const std::vector<VkBuffer>& uniformBuffers, VkDeviceSize uboSize,
                               const std::vector<VkBuffer>& lightBuffers, VkDeviceSize lightUboSize,
                               const std::vector<VkImageView>& textureViews,
-                              const std::vector<VkSampler>& textureSamplers) {
+                              const std::vector<VkSampler>& textureSamplers,
+                              VkImageView shadowMapView, VkSampler shadowMapSampler) {
     m_framesInFlight = framesInFlight;
     m_textureCount   = static_cast<u32>(textureViews.size());
     u32 totalSets    = framesInFlight * m_textureCount;
 
-    // 1. Create descriptor set layout — 3 bindings (same as before)
-    std::array<VkDescriptorSetLayoutBinding, 3> bindings{};
+    // 1. Create descriptor set layout — 4 bindings
+    std::array<VkDescriptorSetLayoutBinding, 4> bindings{};
 
     // Binding 0: view/proj uniform buffer (vertex stage)
     bindings[0].binding            = 0;
@@ -24,7 +25,7 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
     bindings[0].descriptorCount    = 1;
     bindings[0].stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
 
-    // Binding 1: combined image sampler (fragment stage)
+    // Binding 1: combined image sampler (fragment stage) — object texture
     bindings[1].binding            = 1;
     bindings[1].descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     bindings[1].descriptorCount    = 1;
@@ -35,6 +36,12 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
     bindings[2].descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     bindings[2].descriptorCount    = 1;
     bindings[2].stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    // Binding 3: shadow map sampler (fragment stage)
+    bindings[3].binding            = 3;
+    bindings[3].descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[3].descriptorCount    = 1;
+    bindings[3].stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -50,7 +57,7 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
     poolSizes[0].type            = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     poolSizes[0].descriptorCount = totalSets * 2; // view/proj + lighting per set
     poolSizes[1].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = totalSets;
+    poolSizes[1].descriptorCount = totalSets * 2; // texture + shadow map per set
 
     VkDescriptorPoolCreateInfo poolInfo{};
     poolInfo.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -97,7 +104,12 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
             lightBufferInfo.offset = 0;
             lightBufferInfo.range  = lightUboSize;
 
-            std::array<VkWriteDescriptorSet, 3> writes{};
+            VkDescriptorImageInfo shadowInfo{};
+            shadowInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            shadowInfo.imageView   = shadowMapView;
+            shadowInfo.sampler     = shadowMapSampler;
+
+            std::array<VkWriteDescriptorSet, 4> writes{};
 
             writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet          = m_sets[setIndex];
@@ -123,11 +135,19 @@ void VulkanDescriptors::init(VkDevice device, u32 framesInFlight,
             writes[2].descriptorCount = 1;
             writes[2].pBufferInfo     = &lightBufferInfo;
 
+            writes[3].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[3].dstSet          = m_sets[setIndex];
+            writes[3].dstBinding      = 3;
+            writes[3].dstArrayElement = 0;
+            writes[3].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[3].descriptorCount = 1;
+            writes[3].pImageInfo      = &shadowInfo;
+
             vkUpdateDescriptorSets(device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
         }
     }
 
-    Logger::info("Descriptors created ({} sets: {} frames x {} textures)",
+    Logger::info("Descriptors created ({} sets: {} frames x {} textures, with shadow map)",
                  totalSets, framesInFlight, m_textureCount);
 }
 

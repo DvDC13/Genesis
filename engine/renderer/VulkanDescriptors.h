@@ -11,12 +11,13 @@ class VulkanDescriptors {
 public:
     // Creates descriptor sets for multiple textures.
     // Total sets = framesInFlight * textureCount.
-    // All sets share the same UBO/light buffers, but each texture group has its own sampler.
+    // All sets share the same UBO/light buffers and shadow map, but each texture group has its own sampler.
     void init(VkDevice device, u32 framesInFlight,
               const std::vector<VkBuffer>& uniformBuffers, VkDeviceSize uboSize,
               const std::vector<VkBuffer>& lightBuffers, VkDeviceSize lightUboSize,
               const std::vector<VkImageView>& textureViews,
-              const std::vector<VkSampler>& textureSamplers);
+              const std::vector<VkSampler>& textureSamplers,
+              VkImageView shadowMapView, VkSampler shadowMapSampler);
     void shutdown(VkDevice device);
 
     VkDescriptorSetLayout getLayout() const { return m_layout; }

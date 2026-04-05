@@ -63,14 +63,18 @@ void Renderer::init(Window& window) {
         lightBufs.push_back(m_lightBuffers[i].buffer);
     }
 
-    // 6c. Create skybox (shares VP uniform buffers)
+    // 6c. Create shadow map
+    m_shadowMap.init(m_device.getDevice(), m_device.getPhysicalDevice(),
+                     m_commandPool.getPool(), m_device.getGraphicsQueue(),
+                     MAX_FRAMES_IN_FLIGHT);
+
+    // 6d. Create skybox (shares VP uniform buffers)
     m_skybox.init(m_device.getDevice(), m_device.getPhysicalDevice(),
                   m_commandPool.getPool(), m_device.getGraphicsQueue(),
                   m_swapchain.getRenderPass(),
                   uboBuffers, sizeof(ViewProjUBO), MAX_FRAMES_IN_FLIGHT);
 
-    // 7. Create descriptor sets (one set per frame per texture)
-
+    // 7. Create descriptor sets (one set per frame per texture, + shadow map)
     std::vector<VkImageView> textureViews;
     std::vector<VkSampler>   textureSamplers;
     for (const auto& tex : m_textures) {
@@ -83,7 +87,8 @@ void Renderer::init(Window& window) {
         MAX_FRAMES_IN_FLIGHT,
         uboBuffers, sizeof(ViewProjUBO),
         lightBufs, sizeof(LightUBO),
-        textureViews, textureSamplers
+        textureViews, textureSamplers,
+        m_shadowMap.getImageView(), m_shadowMap.getSampler()
     );
 
     // 8. Create graphics pipeline (with push constants for per-object model matrix)
@@ -352,6 +357,7 @@ void Renderer::shutdown() {
 
     m_imgui.shutdown(m_device.getDevice());
     m_skybox.shutdown(m_device.getDevice());
+    m_shadowMap.shutdown(m_device.getDevice());
     m_syncObjects.shutdown(m_device.getDevice());
     m_commandPool.shutdown(m_device.getDevice());
     m_pipeline.shutdown(m_device.getDevice());
@@ -400,10 +406,24 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     f32 aspect = static_cast<f32>(m_swapchain.getExtent().width)
                / static_cast<f32>(m_swapchain.getExtent().height);
 
+    // Compute light space matrix for shadow mapping
+    // The light is directional — position it far along the light direction
+    glm::vec3 lightDir = glm::normalize(m_imguiState.lightDir);
+    glm::vec3 lightPos = lightDir * 15.0f; // Far enough to cover the scene
+    glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 lightProj = glm::ortho(-12.0f, 12.0f, -12.0f, 12.0f, 0.1f, 40.0f);
+    // Vulkan Y-axis flip for the light projection too
+    lightProj[1][1] *= -1.0f;
+    glm::mat4 lightSpaceMatrix = lightProj * lightView;
+
     ViewProjUBO ubo{};
-    ubo.view       = m_camera.getViewMatrix();
-    ubo.projection = m_camera.getProjectionMatrix(aspect);
+    ubo.view             = m_camera.getViewMatrix();
+    ubo.projection       = m_camera.getProjectionMatrix(aspect);
+    ubo.lightSpaceMatrix = lightSpaceMatrix;
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
+
+    // Update shadow map's light VP buffer
+    m_shadowMap.updateLightMatrix(frameIndex, lightSpaceMatrix);
 
     // Use ImGui-controlled lighting values
     LightUBO light{};
@@ -471,6 +491,31 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
         throw std::runtime_error("Failed to begin recording command buffer");
     }
 
+    // ═══════════════════════════════════════════════
+    // PASS 1: Shadow map — render scene depth from light's perspective
+    // ═══════════════════════════════════════════════
+    m_shadowMap.beginShadowPass(cmd, m_currentFrame);
+
+    for (const auto& obj : m_objects) {
+        PushConstantData push{};
+        push.model = obj.getModelMatrix();
+        vkCmdPushConstants(cmd, m_shadowMap.getPipelineLayout(),
+                           VK_SHADER_STAGE_VERTEX_BIT, 0,
+                           sizeof(PushConstantData), &push);
+
+        const Mesh& mesh = m_meshes[obj.meshIndex];
+        VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
+        VkDeviceSize offsets[]    = { 0 };
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+        vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
+    }
+
+    m_shadowMap.endShadowPass(cmd);
+
+    // ═══════════════════════════════════════════════
+    // PASS 2: Main scene — render with lighting + shadow sampling
+    // ═══════════════════════════════════════════════
     VkRenderPassBeginInfo renderPassInfo{};
     renderPassInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     renderPassInfo.renderPass  = m_swapchain.getRenderPass();

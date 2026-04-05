@@ -13,6 +13,7 @@
 #include "renderer/SceneObject.h"
 #include "renderer/Camera.h"
 #include "renderer/Skybox.h"
+#include "renderer/ShadowMap.h"
 #include "ui/ImGuiOverlay.h"
 #include "core/Types.h"
 
@@ -28,6 +29,7 @@ class Window;
 struct ViewProjUBO {
     glm::mat4 view;
     glm::mat4 projection;
+    glm::mat4 lightSpaceMatrix;  // Light's VP matrix for shadow mapping
 };
 
 // Lighting data — sent to the fragment shader every frame
@@ -66,6 +68,7 @@ private:
     VulkanDescriptors m_descriptors;
     Camera            m_camera;
     Skybox            m_skybox;
+    ShadowMap         m_shadowMap;
     ImGuiOverlay      m_imgui;
     ImGuiState        m_imguiState;
 
