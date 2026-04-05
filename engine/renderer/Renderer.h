@@ -12,6 +12,7 @@
 #include "renderer/Mesh.h"
 #include "renderer/SceneObject.h"
 #include "renderer/Camera.h"
+#include "renderer/Skybox.h"
 #include "ui/ImGuiOverlay.h"
 #include "core/Types.h"
 
@@ -64,6 +65,7 @@ private:
     VulkanSyncObjects m_syncObjects;
     VulkanDescriptors m_descriptors;
     Camera            m_camera;
+    Skybox            m_skybox;
     ImGuiOverlay      m_imgui;
     ImGuiState        m_imguiState;
 

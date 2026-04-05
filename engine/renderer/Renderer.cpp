@@ -55,13 +55,21 @@ void Renderer::init(Window& window) {
     // 6. Create uniform buffers (view/proj + lighting)
     createUniformBuffers();
 
-    // 7. Create descriptor sets (one set per frame per texture)
+    // 6b. Build VkBuffer lists for sharing with descriptors and skybox
     std::vector<VkBuffer> uboBuffers;
     std::vector<VkBuffer> lightBufs;
     for (u32 i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         uboBuffers.push_back(m_uniformBuffers[i].buffer);
         lightBufs.push_back(m_lightBuffers[i].buffer);
     }
+
+    // 6c. Create skybox (shares VP uniform buffers)
+    m_skybox.init(m_device.getDevice(), m_device.getPhysicalDevice(),
+                  m_commandPool.getPool(), m_device.getGraphicsQueue(),
+                  m_swapchain.getRenderPass(),
+                  uboBuffers, sizeof(ViewProjUBO), MAX_FRAMES_IN_FLIGHT);
+
+    // 7. Create descriptor sets (one set per frame per texture)
 
     std::vector<VkImageView> textureViews;
     std::vector<VkSampler>   textureSamplers;
@@ -343,6 +351,7 @@ void Renderer::shutdown() {
     vkDeviceWaitIdle(m_device.getDevice());
 
     m_imgui.shutdown(m_device.getDevice());
+    m_skybox.shutdown(m_device.getDevice());
     m_syncObjects.shutdown(m_device.getDevice());
     m_commandPool.shutdown(m_device.getDevice());
     m_pipeline.shutdown(m_device.getDevice());
@@ -490,7 +499,11 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     scissor.extent = m_swapchain.getExtent();
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Draw each scene object with its own texture
+    // Draw skybox first (behind everything)
+    m_skybox.render(cmd, m_currentFrame);
+
+    // Bind scene pipeline and draw each scene object with its own texture
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
     for (const auto& obj : m_objects) {
         VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
