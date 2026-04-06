@@ -623,12 +623,49 @@ void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& 
 
         // ─── Material section ───
         if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+            // Texture selector
             const char* texNames[] = { "Checkerboard", "Gradient", "White" };
             i32 texIdx = static_cast<i32>(obj.textureIndex);
+            i32 texCount = static_cast<i32>(state.meshNames.size()); // approximate available
             if (texIdx < 3) {
-                ImGui::Text("Texture: %s", texNames[texIdx]);
+                ImGui::Combo("Texture", reinterpret_cast<int*>(&obj.textureIndex), texNames, 3);
             } else {
                 ImGui::Text("Texture: Custom (%u)", obj.textureIndex);
+            }
+
+            ImGui::Separator();
+
+            // Diffuse color (tints the texture)
+            ImGui::ColorEdit3("Diffuse", &obj.diffuseColor.x);
+
+            // Specular color
+            ImGui::ColorEdit3("Specular", &obj.specularColor.x);
+
+            // Shininess
+            ImGui::SliderFloat("Shininess", &obj.shininess, 1.0f, 256.0f, "%.0f");
+
+            ImGui::Separator();
+
+            // Material presets
+            if (ImGui::Button("Reset Material")) {
+                obj.diffuseColor  = glm::vec3(1.0f);
+                obj.specularColor = glm::vec3(1.0f);
+                obj.shininess     = 32.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Matte")) {
+                obj.specularColor = glm::vec3(0.1f);
+                obj.shininess     = 4.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Glossy")) {
+                obj.specularColor = glm::vec3(1.0f);
+                obj.shininess     = 128.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Metal")) {
+                obj.specularColor = obj.diffuseColor;
+                obj.shininess     = 256.0f;
             }
         }
     } else {

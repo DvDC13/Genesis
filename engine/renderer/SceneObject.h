@@ -9,8 +9,13 @@
 namespace Genesis {
 
 // Push constant data — sent per draw call, no buffer needed
+// 64 bytes vertex (model) + 32 bytes fragment (material) = 96 bytes total (within 128 byte limit)
 struct PushConstantData {
-    glm::mat4 model;
+    glm::mat4 model;       // 64 bytes — vertex stage
+    glm::vec3 diffuseColor;  // 12 bytes — fragment stage
+    float     shininess;     //  4 bytes
+    glm::vec3 specularColor; // 12 bytes
+    float     _pad0;         //  4 bytes (alignment)
 };
 
 class SceneObject {
@@ -24,6 +29,11 @@ public:
     // Which mesh and texture this object uses (index into Renderer's arrays)
     u32 meshIndex    = 0;
     u32 textureIndex = 0;
+
+    // Material properties
+    glm::vec3 diffuseColor  = glm::vec3(1.0f);  // Multiplied with texture color
+    glm::vec3 specularColor = glm::vec3(1.0f);  // Specular highlight tint
+    f32       shininess     = 32.0f;             // Specular exponent (higher = sharper)
 
     // Optional per-frame animation
     f32 rotationSpeed = 0.0f; // degrees per second around Y axis

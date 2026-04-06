@@ -13,6 +13,15 @@ layout(binding = 2) uniform LightUBO {
 
 layout(binding = 3) uniform sampler2D shadowMap;
 
+// Per-object material properties (from push constants)
+layout(push_constant) uniform PushConstants {
+    mat4 model;          // vertex stage only
+    vec3 diffuseColor;   // material diffuse tint
+    float shininess;     // specular exponent
+    vec3 specularColor;  // specular highlight tint
+    float _pad0;
+} push;
+
 layout(location = 0) in vec3 fragWorldPos;
 layout(location = 1) in vec3 fragNormal;
 layout(location = 2) in vec2 fragTexCoord;
@@ -58,23 +67,26 @@ void main() {
     vec3 texColor = texture(texSampler, fragTexCoord).rgb;
     vec3 normal   = normalize(fragNormal);
 
+    // Apply material diffuse color to texture
+    vec3 baseColor = texColor * push.diffuseColor;
+
     // Ambient
-    vec3 ambient = light.ambientStrength * light.lightColor;
+    vec3 ambient = light.ambientStrength * light.lightColor * baseColor;
 
     // Diffuse
     float diff   = max(dot(normal, light.lightDir), 0.0);
-    vec3 diffuse = diff * light.lightColor;
+    vec3 diffuse = diff * light.lightColor * baseColor;
 
-    // Specular (Blinn-Phong)
+    // Specular (Blinn-Phong) with material properties
     vec3 viewDir    = normalize(light.viewPos - fragWorldPos);
     vec3 halfwayDir = normalize(light.lightDir + viewDir);
-    float spec      = pow(max(dot(normal, halfwayDir), 0.0), 32.0);
-    vec3 specular   = spec * light.lightColor;
+    float spec      = pow(max(dot(normal, halfwayDir), 0.0), push.shininess);
+    vec3 specular   = spec * light.lightColor * push.specularColor;
 
     // Shadow factor: 0.0 = fully lit, 1.0 = fully in shadow
     float shadow = calculateShadow(fragPosLightSpace, normal, light.lightDir);
 
     // Shadow affects diffuse and specular, but not ambient
-    vec3 result = (ambient + (1.0 - shadow) * (diffuse + specular)) * texColor;
+    vec3 result = ambient + (1.0 - shadow) * (diffuse + specular);
     outColor = vec4(result, 1.0);
 }

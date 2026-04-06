@@ -576,11 +576,10 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     m_shadowMap.beginShadowPass(cmd, m_currentFrame);
 
     for (const auto& obj : m_objects) {
-        PushConstantData push{};
-        push.model = obj.getModelMatrix();
+        glm::mat4 model = obj.getModelMatrix();
         vkCmdPushConstants(cmd, m_shadowMap.getPipelineLayout(),
                            VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(PushConstantData), &push);
+                           sizeof(glm::mat4), &model);
 
         const Mesh& mesh = m_meshes[obj.meshIndex];
         VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
@@ -640,9 +639,12 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
                                     &descriptorSet, 0, nullptr);
 
             PushConstantData push{};
-            push.model = obj.getModelMatrix();
+            push.model         = obj.getModelMatrix();
+            push.diffuseColor  = obj.diffuseColor;
+            push.shininess     = obj.shininess;
+            push.specularColor = obj.specularColor;
             vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
-                               VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(PushConstantData), &push);
 
             const Mesh& mesh = m_meshes[obj.meshIndex];

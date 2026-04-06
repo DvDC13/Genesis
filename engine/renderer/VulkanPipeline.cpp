@@ -97,7 +97,7 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
 
     // Pipeline layout — descriptor set layout + optional push constants
     VkPushConstantRange pushConstantRange{};
-    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     pushConstantRange.offset     = 0;
     pushConstantRange.size       = pushConstantSize;
 

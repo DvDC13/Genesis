@@ -9,7 +9,11 @@ layout(binding = 0) uniform UniformBufferObject {
 
 // Per-object data (changes every draw call, sent via push constants)
 layout(push_constant) uniform PushConstants {
-    mat4 model;
+    mat4 model;          // vertex stage
+    vec3 diffuseColor;   // fragment stage (passed through)
+    float shininess;
+    vec3 specularColor;
+    float _pad0;
 } push;
 
 layout(location = 0) in vec3 inPosition;
