@@ -69,10 +69,15 @@ void Renderer::init(Window& window) {
                      m_commandPool.getPool(), m_device.getGraphicsQueue(),
                      MAX_FRAMES_IN_FLIGHT);
 
-    // 6d. Create skybox (shares VP uniform buffers)
+    // 6d. Create offscreen viewport framebuffer (scene renders here)
+    m_viewportFB.init(m_device.getDevice(), m_device.getPhysicalDevice(),
+                      m_swapchain.getExtent().width, m_swapchain.getExtent().height,
+                      m_swapchain.getImageFormat());
+
+    // 6e. Create skybox (uses viewport render pass, not swapchain)
     m_skybox.init(m_device.getDevice(), m_device.getPhysicalDevice(),
                   m_commandPool.getPool(), m_device.getGraphicsQueue(),
-                  m_swapchain.getRenderPass(),
+                  m_viewportFB.getRenderPass(),
                   uboBuffers, sizeof(ViewProjUBO), MAX_FRAMES_IN_FLIGHT);
 
     // 7. Create descriptor sets (one set per frame per texture, + shadow map)
@@ -92,11 +97,11 @@ void Renderer::init(Window& window) {
         m_shadowMap.getImageView(), m_shadowMap.getSampler()
     );
 
-    // 8. Create graphics pipeline (with push constants for per-object model matrix)
+    // 8. Create graphics pipeline (uses viewport render pass)
     m_pipeline.init(
         m_device.getDevice(),
-        m_swapchain.getRenderPass(),
-        m_swapchain.getExtent(),
+        m_viewportFB.getRenderPass(),
+        m_viewportFB.getExtent(),
         "phong.vert.spv",
         "phong.frag.spv",
         m_descriptors.getLayout(),
@@ -106,7 +111,7 @@ void Renderer::init(Window& window) {
     // 9. Create synchronization objects
     m_syncObjects.init(m_device.getDevice(), MAX_FRAMES_IN_FLIGHT, m_swapchain.getImageCount());
 
-    // 10. Initialize ImGui overlay
+    // 10. Initialize ImGui overlay (uses swapchain render pass — ImGui renders to screen)
     m_imgui.init(
         window.getHandle(),
         m_instance.getInstance(),
@@ -117,6 +122,12 @@ void Renderer::init(Window& window) {
         m_swapchain.getRenderPass(),
         m_swapchain.getImageCount()
     );
+
+    // 10b. Register viewport framebuffer as an ImGui texture
+    m_viewportFB.createImGuiDescriptor();
+    m_imguiState.viewportTexture = m_viewportFB.getImGuiTexture();
+    m_imguiState.viewportWidth   = static_cast<f32>(m_viewportFB.getExtent().width);
+    m_imguiState.viewportHeight  = static_cast<f32>(m_viewportFB.getExtent().height);
 
     // 11. Scan for available OBJ models in assets/models/
     scanAvailableModels();
@@ -267,6 +278,15 @@ void Renderer::drawFrame() {
     // FPS counter
     updateFPSCounter();
 
+    // Handle viewport resize BEFORE building ImGui (so the new texture is used)
+    if (m_imguiState.viewportResized) {
+        m_imguiState.viewportResized = false;
+        vkDeviceWaitIdle(m_device.getDevice());
+        m_viewportFB.resize(m_device.getDevice(), m_device.getPhysicalDevice(),
+                            m_imguiState.newViewportWidth, m_imguiState.newViewportHeight);
+        m_imguiState.viewportTexture = m_viewportFB.getImGuiTexture();
+    }
+
     // ─── ImGui frame ───
     m_imgui.newFrame();
 
@@ -370,6 +390,7 @@ void Renderer::shutdown() {
     vkDeviceWaitIdle(m_device.getDevice());
 
     m_imgui.shutdown(m_device.getDevice());
+    m_viewportFB.shutdown(m_device.getDevice());
     m_skybox.shutdown(m_device.getDevice());
     m_shadowMap.shutdown(m_device.getDevice());
     m_syncObjects.shutdown(m_device.getDevice());
@@ -417,8 +438,10 @@ void Renderer::createUniformBuffers() {
 }
 
 void Renderer::updateUniformBuffer(u32 frameIndex) {
-    f32 aspect = static_cast<f32>(m_swapchain.getExtent().width)
-               / static_cast<f32>(m_swapchain.getExtent().height);
+    // Use the viewport framebuffer's aspect ratio (not the swapchain's)
+    VkExtent2D vpExtent = m_viewportFB.getExtent();
+    f32 aspect = static_cast<f32>(vpExtent.width)
+               / static_cast<f32>(vpExtent.height);
 
     // Compute light space matrix for shadow mapping
     // The light is directional — position it far along the light direction
@@ -462,8 +485,9 @@ void Renderer::processInput(f32 deltaTime) {
     }
     tabWasPressed = tabPressed;
 
-    // Only process camera input when cursor is captured
-    if (!m_cursorCaptured) return;
+    // Camera movement: either cursor captured OR viewport hovered with right mouse held
+    bool canMoveCamera = m_cursorCaptured || m_imguiState.viewportHovered;
+    if (!canMoveCamera) return;
 
     if (m_window->isKeyPressed(GLFW_KEY_W))
         m_camera.processKeyboard(CameraDirection::Forward, deltaTime);
@@ -474,10 +498,13 @@ void Renderer::processInput(f32 deltaTime) {
     if (m_window->isKeyPressed(GLFW_KEY_D))
         m_camera.processKeyboard(CameraDirection::Right, deltaTime);
 
-    f32 dx, dy;
-    m_window->getMouseDelta(dx, dy);
-    if (dx != 0.0f || dy != 0.0f) {
-        m_camera.processMouseMovement(dx, dy);
+    // Mouse look only when cursor is captured (Tab mode)
+    if (m_cursorCaptured) {
+        f32 dx, dy;
+        m_window->getMouseDelta(dx, dy);
+        if (dx != 0.0f || dy != 0.0f) {
+            m_camera.processMouseMovement(dx, dy);
+        }
     }
 }
 
@@ -491,7 +518,7 @@ void Renderer::updateFPSCounter() {
         m_frameCount = 0;
         m_fpsTimer   = currentTime;
 
-        std::string title = std::format("Genesis Engine | {:.0f} FPS | {} objects",
+        std::string title = std::format("Genesis Editor | {:.0f} FPS | {} objects",
                                         m_lastFPS, m_objects.size());
         m_window->setTitle(title);
     }
@@ -528,66 +555,91 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
     m_shadowMap.endShadowPass(cmd);
 
     // ═══════════════════════════════════════════════
-    // PASS 2: Main scene — render with lighting + shadow sampling
+    // PASS 2: Offscreen scene — render 3D world to viewport framebuffer
     // ═══════════════════════════════════════════════
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass  = m_swapchain.getRenderPass();
-    renderPassInfo.framebuffer = m_swapchain.getFramebuffer(imageIndex);
-    renderPassInfo.renderArea.offset = { 0, 0 };
-    renderPassInfo.renderArea.extent = m_swapchain.getExtent();
+    {
+        VkExtent2D vpExtent = m_viewportFB.getExtent();
 
-    VkClearValue clearValues[2]{};
-    clearValues[0].color        = {{ 0.02f, 0.02f, 0.04f, 1.0f }};
-    clearValues[1].depthStencil = { 1.0f, 0 };
-    renderPassInfo.clearValueCount = 2;
-    renderPassInfo.pClearValues    = clearValues;
+        VkRenderPassBeginInfo rpInfo{};
+        rpInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpInfo.renderPass  = m_viewportFB.getRenderPass();
+        rpInfo.framebuffer = m_viewportFB.getFramebuffer();
+        rpInfo.renderArea.offset = { 0, 0 };
+        rpInfo.renderArea.extent = vpExtent;
 
-    vkCmdBeginRenderPass(cmd, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
+        VkClearValue clearValues[2]{};
+        clearValues[0].color        = {{ 0.02f, 0.02f, 0.04f, 1.0f }};
+        clearValues[1].depthStencil = { 1.0f, 0 };
+        rpInfo.clearValueCount = 2;
+        rpInfo.pClearValues    = clearValues;
 
-    // Set dynamic viewport and scissor
-    VkViewport viewport{};
-    viewport.width    = static_cast<float>(m_swapchain.getExtent().width);
-    viewport.height   = static_cast<float>(m_swapchain.getExtent().height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    VkRect2D scissor{};
-    scissor.extent = m_swapchain.getExtent();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+        // Set viewport and scissor to offscreen size
+        VkViewport viewport{};
+        viewport.width    = static_cast<float>(vpExtent.width);
+        viewport.height   = static_cast<float>(vpExtent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-    // Draw skybox first (behind everything)
-    m_skybox.render(cmd, m_currentFrame);
+        VkRect2D scissor{};
+        scissor.extent = vpExtent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    // Bind scene pipeline and draw each scene object with its own texture
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
-    for (const auto& obj : m_objects) {
-        VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                m_pipeline.getPipelineLayout(), 0, 1,
-                                &descriptorSet, 0, nullptr);
+        // Draw skybox first (behind everything)
+        m_skybox.render(cmd, m_currentFrame);
 
-        PushConstantData push{};
-        push.model = obj.getModelMatrix();
-        vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
-                           VK_SHADER_STAGE_VERTEX_BIT, 0,
-                           sizeof(PushConstantData), &push);
+        // Bind scene pipeline and draw each scene object with its own texture
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
+        for (const auto& obj : m_objects) {
+            VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                    m_pipeline.getPipelineLayout(), 0, 1,
+                                    &descriptorSet, 0, nullptr);
 
-        const Mesh& mesh = m_meshes[obj.meshIndex];
-        VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
-        VkDeviceSize offsets[]    = { 0 };
-        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+            PushConstantData push{};
+            push.model = obj.getModelMatrix();
+            vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
+                               VK_SHADER_STAGE_VERTEX_BIT, 0,
+                               sizeof(PushConstantData), &push);
 
-        vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
+            const Mesh& mesh = m_meshes[obj.meshIndex];
+            VkBuffer vertexBuffers[] = { mesh.getVertexBuffer() };
+            VkDeviceSize offsets[]    = { 0 };
+            vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(cmd, mesh.getIndexBuffer(), 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdDrawIndexed(cmd, mesh.getIndexCount(), 1, 0, 0, 0);
+        }
+
+        vkCmdEndRenderPass(cmd);
     }
 
-    // Draw ImGui on top of the 3D scene (same render pass)
-    m_imgui.render(cmd);
+    // ═══════════════════════════════════════════════
+    // PASS 3: Swapchain — render ImGui editor (viewport shown as texture)
+    // ═══════════════════════════════════════════════
+    {
+        VkRenderPassBeginInfo rpInfo{};
+        rpInfo.sType       = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpInfo.renderPass  = m_swapchain.getRenderPass();
+        rpInfo.framebuffer = m_swapchain.getFramebuffer(imageIndex);
+        rpInfo.renderArea.offset = { 0, 0 };
+        rpInfo.renderArea.extent = m_swapchain.getExtent();
 
-    vkCmdEndRenderPass(cmd);
+        VkClearValue clearValues[2]{};
+        clearValues[0].color        = {{ 0.10f, 0.10f, 0.10f, 1.0f }}; // Dark gray editor bg
+        clearValues[1].depthStencil = { 1.0f, 0 };
+        rpInfo.clearValueCount = 2;
+        rpInfo.pClearValues    = clearValues;
+
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        // ImGui renders the entire editor UI including the viewport image
+        m_imgui.render(cmd);
+
+        vkCmdEndRenderPass(cmd);
+    }
 
     if (vkEndCommandBuffer(cmd) != VK_SUCCESS) {
         throw std::runtime_error("Failed to record command buffer");

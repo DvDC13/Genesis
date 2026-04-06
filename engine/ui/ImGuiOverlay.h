@@ -28,12 +28,6 @@ struct ImGuiState {
     // Selected object
     i32 selectedObject = -1;
 
-    // Display toggles
-    bool showStats      = true;
-    bool showLighting   = true;
-    bool showObjects    = true;
-    bool showModelLoader = true;
-
     // Model loading request (set by UI, consumed by Renderer)
     std::string pendingModelPath;
     bool        modelLoadRequested = false;
@@ -44,8 +38,17 @@ struct ImGuiState {
     std::vector<std::string> availableModels;
     i32 selectedModelIndex = 0;
 
-    // Mesh names for the object list (index → name)
+    // Mesh names for the object list (index -> name)
     std::vector<std::string> meshNames;
+
+    // Viewport info
+    VkDescriptorSet viewportTexture = VK_NULL_HANDLE;
+    f32 viewportWidth  = 0.0f;
+    f32 viewportHeight = 0.0f;
+    bool viewportHovered = false; // true when mouse is over the 3D viewport
+    bool viewportResized = false; // true when viewport panel changed size
+    u32  newViewportWidth  = 0;
+    u32  newViewportHeight = 0;
 };
 
 class ImGuiOverlay {
@@ -61,7 +64,16 @@ public:
     void render(VkCommandBuffer cmd);
 
 private:
+    void buildDockspace();
+    void buildMenuBar(ImGuiState& state);
+    void buildViewport(ImGuiState& state);
+    void buildSceneHierarchy(ImGuiState& state, std::vector<SceneObject>& objects);
+    void buildProperties(ImGuiState& state, std::vector<SceneObject>& objects);
+    void buildStats(ImGuiState& state);
+    void buildModelLoader(ImGuiState& state);
+
     VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
+    bool m_firstFrame = true;
 };
 
 } // namespace Genesis

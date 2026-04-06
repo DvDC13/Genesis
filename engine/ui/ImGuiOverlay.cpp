@@ -2,6 +2,7 @@
 #include "core/Logger.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 
@@ -37,14 +38,40 @@ void ImGuiOverlay::init(GLFWwindow* window, VkInstance instance,
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
-    // Style — dark with some transparency
+    // Editor-style dark theme
     ImGui::StyleColorsDark();
     ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding   = 6.0f;
-    style.FrameRounding    = 4.0f;
-    style.GrabRounding     = 3.0f;
-    style.Alpha            = 0.95f;
+    style.WindowRounding   = 2.0f;
+    style.FrameRounding    = 2.0f;
+    style.GrabRounding     = 2.0f;
+    style.TabRounding      = 2.0f;
+    style.ScrollbarRounding = 2.0f;
     style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize  = 0.0f;
+    style.WindowPadding    = ImVec2(8.0f, 8.0f);
+    style.ItemSpacing      = ImVec2(8.0f, 4.0f);
+    style.IndentSpacing    = 16.0f;
+
+    // Blender-inspired colors
+    auto& colors = style.Colors;
+    colors[ImGuiCol_WindowBg]           = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
+    colors[ImGuiCol_Header]             = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
+    colors[ImGuiCol_HeaderHovered]      = ImVec4(0.35f, 0.35f, 0.35f, 1.00f);
+    colors[ImGuiCol_HeaderActive]       = ImVec4(0.40f, 0.40f, 0.40f, 1.00f);
+    colors[ImGuiCol_Button]             = ImVec4(0.28f, 0.28f, 0.28f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]      = ImVec4(0.35f, 0.42f, 0.55f, 1.00f);
+    colors[ImGuiCol_ButtonActive]       = ImVec4(0.25f, 0.35f, 0.50f, 1.00f);
+    colors[ImGuiCol_FrameBg]            = ImVec4(0.12f, 0.12f, 0.12f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]     = ImVec4(0.20f, 0.20f, 0.20f, 1.00f);
+    colors[ImGuiCol_FrameBgActive]      = ImVec4(0.25f, 0.25f, 0.25f, 1.00f);
+    colors[ImGuiCol_Tab]                = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
+    colors[ImGuiCol_TabHovered]         = ImVec4(0.35f, 0.42f, 0.55f, 1.00f);
+    colors[ImGuiCol_TabSelected]        = ImVec4(0.25f, 0.32f, 0.45f, 1.00f);
+    colors[ImGuiCol_TitleBg]            = ImVec4(0.12f, 0.12f, 0.12f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]      = ImVec4(0.15f, 0.15f, 0.15f, 1.00f);
+    colors[ImGuiCol_MenuBarBg]          = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
+    colors[ImGuiCol_Separator]          = ImVec4(0.30f, 0.30f, 0.30f, 1.00f);
+    colors[ImGuiCol_DockingEmptyBg]     = ImVec4(0.10f, 0.10f, 0.10f, 1.00f);
 
     // 3. Initialize GLFW backend
     ImGui_ImplGlfw_InitForVulkan(window, true);
@@ -65,7 +92,9 @@ void ImGuiOverlay::init(GLFWwindow* window, VkInstance instance,
 
     ImGui_ImplVulkan_Init(&initInfo);
 
-    Logger::info("ImGui overlay initialized");
+    m_firstFrame = true;
+
+    Logger::info("ImGui overlay initialized (docked editor layout)");
 }
 
 void ImGuiOverlay::shutdown(VkDevice device) {
@@ -87,28 +116,271 @@ void ImGuiOverlay::newFrame() {
 }
 
 void ImGuiOverlay::buildUI(ImGuiState& state, std::vector<SceneObject>& objects) {
-    // ─── Stats Panel ───
-    if (state.showStats) {
-        ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Stats", &state.showStats);
+    buildDockspace();
+    buildMenuBar(state);
+    buildViewport(state);
+    buildSceneHierarchy(state, objects);
+    buildProperties(state, objects);
+    buildStats(state);
+    buildModelLoader(state);
+}
 
-        ImGui::Text("FPS: %.0f", state.fps);
-        ImGui::Text("GPU: %s", state.gpuName);
-        ImGui::Separator();
-        ImGui::Text("Objects:    %u", state.objectCount);
-        ImGui::Text("Draw calls: %u", state.drawCalls);
-        ImGui::Text("Vertices:   %u", state.vertexCount);
+void ImGuiOverlay::render(VkCommandBuffer cmd) {
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+}
 
-        ImGui::End();
+// ─── Private Panel Builders ───
+
+void ImGuiOverlay::buildDockspace() {
+    // Create a fullscreen dockspace that covers the entire window
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize(viewport->WorkSize);
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    ImGuiWindowFlags windowFlags =
+        ImGuiWindowFlags_NoDocking |
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoNavFocus |
+        ImGuiWindowFlags_MenuBar;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+
+    ImGui::Begin("DockSpace", nullptr, windowFlags);
+    ImGui::PopStyleVar(3);
+
+    ImGuiID dockspaceId = ImGui::GetID("EditorDockSpace");
+
+    // Set up default layout on first frame
+    if (m_firstFrame) {
+        m_firstFrame = false;
+
+        ImGui::DockBuilderRemoveNode(dockspaceId);
+        ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+        ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
+
+        // Split: left panel (20%) | center+right
+        ImGuiID dockLeft, dockCenterRight;
+        ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.18f, &dockLeft, &dockCenterRight);
+
+        // Split center+right: center | right panel (22%)
+        ImGuiID dockCenter, dockRight;
+        ImGui::DockBuilderSplitNode(dockCenterRight, ImGuiDir_Right, 0.22f, &dockRight, &dockCenter);
+
+        // Split center: viewport | bottom stats bar (small)
+        ImGuiID dockViewport, dockBottom;
+        ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Down, 0.06f, &dockBottom, &dockViewport);
+
+        // Dock windows
+        ImGui::DockBuilderDockWindow("Viewport", dockViewport);
+        ImGui::DockBuilderDockWindow("Scene", dockLeft);
+        ImGui::DockBuilderDockWindow("Model Loader", dockLeft);  // tabbed with Scene
+        ImGui::DockBuilderDockWindow("Properties", dockRight);
+        ImGui::DockBuilderDockWindow("Lighting", dockRight);     // tabbed with Properties
+        ImGui::DockBuilderDockWindow("Stats", dockBottom);
+
+        ImGui::DockBuilderFinish(dockspaceId);
     }
 
-    // ─── Lighting Panel ───
-    if (state.showLighting) {
-        ImGui::SetNextWindowPos(ImVec2(10, 180), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(280, 0), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Lighting", &state.showLighting);
+    ImGui::DockSpace(dockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+    ImGui::End();
+}
 
+void ImGuiOverlay::buildMenuBar(ImGuiState& state) {
+    // The menu bar is inside the dockspace window — we use BeginMainMenuBar
+    if (ImGui::BeginMainMenuBar()) {
+        if (ImGui::BeginMenu("File")) {
+            if (ImGui::MenuItem("New Scene")) {
+                // Placeholder
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Exit", "Esc")) {
+                // Will be handled by processInput
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("Add")) {
+            if (ImGui::MenuItem("Cube")) {
+                state.pendingModelPath = "__procedural_cube__";
+                state.modelLoadRequested = true;
+            }
+            if (ImGui::MenuItem("Sphere")) {
+                state.pendingModelPath = "__procedural_sphere__";
+                state.modelLoadRequested = true;
+            }
+            if (ImGui::MenuItem("Torus")) {
+                state.pendingModelPath = "__procedural_torus__";
+                state.modelLoadRequested = true;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Load OBJ...")) {
+                // Open the model loader panel
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu("View")) {
+            ImGui::MenuItem("Stats", nullptr, true);
+            ImGui::MenuItem("Model Loader", nullptr, true);
+            ImGui::EndMenu();
+        }
+
+        // Right-aligned FPS display
+        std::string fpsText = std::format("FPS: {:.0f}", state.fps);
+        float fpsWidth = ImGui::CalcTextSize(fpsText.c_str()).x;
+        ImGui::SameLine(ImGui::GetWindowWidth() - fpsWidth - 16.0f);
+        ImGui::TextDisabled("%s", fpsText.c_str());
+
+        ImGui::EndMainMenuBar();
+    }
+}
+
+void ImGuiOverlay::buildViewport(ImGuiState& state) {
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::Begin("Viewport");
+    ImGui::PopStyleVar();
+
+    // Get available region for the viewport image
+    ImVec2 viewportSize = ImGui::GetContentRegionAvail();
+
+    // Clamp to minimum size
+    if (viewportSize.x < 64.0f) viewportSize.x = 64.0f;
+    if (viewportSize.y < 64.0f) viewportSize.y = 64.0f;
+
+    // Check if viewport was resized
+    u32 newW = static_cast<u32>(viewportSize.x);
+    u32 newH = static_cast<u32>(viewportSize.y);
+    if (newW != static_cast<u32>(state.viewportWidth) ||
+        newH != static_cast<u32>(state.viewportHeight)) {
+        state.viewportResized   = true;
+        state.newViewportWidth  = newW;
+        state.newViewportHeight = newH;
+        state.viewportWidth     = viewportSize.x;
+        state.viewportHeight    = viewportSize.y;
+    }
+
+    // Display the 3D scene as a texture
+    if (state.viewportTexture != VK_NULL_HANDLE) {
+        ImTextureID texId = reinterpret_cast<ImTextureID>(state.viewportTexture);
+        ImGui::Image(texId, viewportSize);
+    }
+
+    // Track if the viewport is hovered (for camera input)
+    state.viewportHovered = ImGui::IsItemHovered();
+
+    ImGui::End();
+}
+
+void ImGuiOverlay::buildSceneHierarchy(ImGuiState& state, std::vector<SceneObject>& objects) {
+    ImGui::Begin("Scene");
+
+    // Header with object count
+    ImGui::Text("Objects: %u", static_cast<u32>(objects.size()));
+    ImGui::Separator();
+
+    // Object list
+    for (i32 i = 0; i < static_cast<i32>(objects.size()); i++) {
+        const char* meshName = "Unknown";
+        if (objects[i].meshIndex < static_cast<u32>(state.meshNames.size())) {
+            meshName = state.meshNames[objects[i].meshIndex].c_str();
+        }
+
+        // Icon-like prefix based on mesh type
+        std::string label = std::format("  {}##obj{}", meshName, i);
+
+        bool isSelected = (state.selectedObject == i);
+        if (ImGui::Selectable(label.c_str(), isSelected)) {
+            state.selectedObject = isSelected ? -1 : i;
+        }
+
+        // Right-click context menu
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Delete")) {
+                objects.erase(objects.begin() + i);
+                if (state.selectedObject == i) state.selectedObject = -1;
+                else if (state.selectedObject > i) state.selectedObject--;
+                ImGui::EndPopup();
+                break; // list changed, exit loop
+            }
+            if (ImGui::MenuItem("Duplicate")) {
+                SceneObject copy = objects[i];
+                copy.position += glm::vec3(1.0f, 0.0f, 0.0f); // offset slightly
+                objects.insert(objects.begin() + i + 1, copy);
+                state.selectedObject = i + 1;
+                ImGui::EndPopup();
+                break;
+            }
+            ImGui::EndPopup();
+        }
+    }
+
+    ImGui::End();
+}
+
+void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& objects) {
+    ImGui::Begin("Properties");
+
+    if (state.selectedObject >= 0 && state.selectedObject < static_cast<i32>(objects.size())) {
+        SceneObject& obj = objects[state.selectedObject];
+
+        // Object header
+        const char* meshName = "Unknown";
+        if (obj.meshIndex < static_cast<u32>(state.meshNames.size())) {
+            meshName = state.meshNames[obj.meshIndex].c_str();
+        }
+        ImGui::Text("Object %d: %s", state.selectedObject, meshName);
+        ImGui::Separator();
+
+        // ─── Transform section ───
+        if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::DragFloat3("Position", &obj.position.x, 0.05f);
+            ImGui::DragFloat3("Rotation", &obj.rotation.x, 1.0f);
+            ImGui::DragFloat3("Scale",    &obj.scale.x, 0.05f, 0.01f, 20.0f);
+            ImGui::DragFloat("Spin Speed", &obj.rotationSpeed, 1.0f);
+
+            if (ImGui::Button("Reset Transform")) {
+                obj.position = glm::vec3(0.0f);
+                obj.rotation = glm::vec3(0.0f);
+                obj.scale    = glm::vec3(1.0f);
+                obj.rotationSpeed = 0.0f;
+            }
+        }
+
+        // ─── Mesh section ───
+        if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Text("Type: %s", meshName);
+            ImGui::Text("Index: %u", obj.meshIndex);
+        }
+
+        // ─── Material section ───
+        if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
+            const char* texNames[] = { "Checkerboard", "Gradient", "White" };
+            i32 texIdx = static_cast<i32>(obj.textureIndex);
+            if (texIdx < 3) {
+                ImGui::Text("Texture: %s", texNames[texIdx]);
+            } else {
+                ImGui::Text("Texture: Custom (%u)", obj.textureIndex);
+            }
+        }
+    } else {
+        ImGui::TextDisabled("No object selected");
+        ImGui::TextDisabled("Select an object in the Scene panel");
+    }
+
+    ImGui::End();
+
+    // ─── Lighting panel (separate, tabbed with Properties) ───
+    ImGui::Begin("Lighting");
+
+    if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderFloat3("Direction", &state.lightDir.x, -1.0f, 1.0f);
         ImGui::ColorEdit3("Color", &state.lightColor.x);
         ImGui::SliderFloat("Ambient", &state.ambientStrength, 0.0f, 1.0f);
@@ -118,122 +390,77 @@ void ImGuiOverlay::buildUI(ImGuiState& state, std::vector<SceneObject>& objects)
         if (len > 0.001f) {
             state.lightDir /= len;
         }
-
-        ImGui::End();
     }
 
-    // ─── Object Inspector ───
-    if (state.showObjects) {
-        ImGui::SetNextWindowPos(ImVec2(10, 380), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(280, 300), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Objects", &state.showObjects);
-
-        // Object list — use dynamic mesh names
-        for (i32 i = 0; i < static_cast<i32>(objects.size()); i++) {
-            const char* meshName = "Unknown";
-            if (objects[i].meshIndex < static_cast<u32>(state.meshNames.size())) {
-                meshName = state.meshNames[objects[i].meshIndex].c_str();
-            }
-            std::string label = std::format("{}: {} ##obj{}", i, meshName, i);
-
-            if (ImGui::Selectable(label.c_str(), state.selectedObject == i)) {
-                state.selectedObject = (state.selectedObject == i) ? -1 : i;
-            }
-        }
-
-        ImGui::Separator();
-
-        // Edit selected object
-        if (state.selectedObject >= 0 && state.selectedObject < static_cast<i32>(objects.size())) {
-            SceneObject& obj = objects[state.selectedObject];
-            ImGui::Text("Object %d", state.selectedObject);
-            ImGui::DragFloat3("Position", &obj.position.x, 0.05f);
-            ImGui::DragFloat3("Rotation", &obj.rotation.x, 1.0f);
-            ImGui::DragFloat3("Scale", &obj.scale.x, 0.05f, 0.01f, 20.0f);
-            ImGui::DragFloat("Spin Speed", &obj.rotationSpeed, 1.0f);
-        } else {
-            ImGui::TextDisabled("Select an object above");
-        }
-
-        ImGui::End();
-    }
-
-    // ─── Model Loader Panel ───
-    if (state.showModelLoader) {
-        ImGui::SetNextWindowPos(ImVec2(300, 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(300, 0), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Model Loader", &state.showModelLoader);
-
-        ImGui::Text("Load OBJ models into the scene");
-        ImGui::Separator();
-
-        // Model selector from available files
-        if (!state.availableModels.empty()) {
-            ImGui::Text("Available Models:");
-            for (i32 i = 0; i < static_cast<i32>(state.availableModels.size()); i++) {
-                if (ImGui::RadioButton(state.availableModels[i].c_str(), state.selectedModelIndex == i)) {
-                    state.selectedModelIndex = i;
-                }
-            }
-        } else {
-            ImGui::TextDisabled("No .obj files found in assets/models/");
-        }
-
-        ImGui::Separator();
-
-        // Custom path input
-        static char customPath[256] = "";
-        ImGui::InputText("Custom Path", customPath, sizeof(customPath));
-
-        ImGui::Separator();
-
-        // Settings for the loaded model
-        const char* texNames[] = { "Checkerboard", "Gradient", "White" };
-        ImGui::Combo("Texture", &state.modelTexture, texNames, 3);
-        ImGui::DragFloat("Scale", &state.modelScale, 0.05f, 0.01f, 50.0f);
-
-        ImGui::Separator();
-
-        // Load button (from list)
-        if (!state.availableModels.empty()) {
-            if (ImGui::Button("Load Selected Model", ImVec2(-1, 30))) {
-                state.pendingModelPath = state.availableModels[state.selectedModelIndex];
-                state.modelLoadRequested = true;
-            }
-        }
-
-        // Load from custom path
-        if (customPath[0] != '\0') {
-            if (ImGui::Button("Load from Custom Path", ImVec2(-1, 30))) {
-                state.pendingModelPath = customPath;
-                state.modelLoadRequested = true;
-            }
-        }
-
-        ImGui::Spacing();
-
-        // Add procedural shapes
-        ImGui::Text("Add Procedural Shape:");
-        if (ImGui::Button("Add Cube", ImVec2(-1, 0))) {
-            state.pendingModelPath = "__procedural_cube__";
-            state.modelLoadRequested = true;
-        }
-        if (ImGui::Button("Add Sphere", ImVec2(-1, 0))) {
-            state.pendingModelPath = "__procedural_sphere__";
-            state.modelLoadRequested = true;
-        }
-        if (ImGui::Button("Add Torus", ImVec2(-1, 0))) {
-            state.pendingModelPath = "__procedural_torus__";
-            state.modelLoadRequested = true;
-        }
-
-        ImGui::End();
-    }
+    ImGui::End();
 }
 
-void ImGuiOverlay::render(VkCommandBuffer cmd) {
-    ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+void ImGuiOverlay::buildStats(ImGuiState& state) {
+    ImGui::Begin("Stats");
+
+    ImGui::Text("GPU: %s", state.gpuName);
+    ImGui::SameLine(0.0f, 20.0f);
+    ImGui::Text("Objects: %u", state.objectCount);
+    ImGui::SameLine(0.0f, 20.0f);
+    ImGui::Text("Draw Calls: %u", state.drawCalls);
+    ImGui::SameLine(0.0f, 20.0f);
+    ImGui::Text("Vertices: %u", state.vertexCount);
+    ImGui::SameLine(0.0f, 20.0f);
+    ImGui::Text("FPS: %.0f", state.fps);
+
+    ImGui::End();
+}
+
+void ImGuiOverlay::buildModelLoader(ImGuiState& state) {
+    ImGui::Begin("Model Loader");
+
+    // Model selector from available files
+    if (!state.availableModels.empty()) {
+        ImGui::Text("Available Models:");
+        ImGui::Separator();
+        for (i32 i = 0; i < static_cast<i32>(state.availableModels.size()); i++) {
+            // Show just the filename, not the full path
+            std::string filename = state.availableModels[i];
+            auto pos = filename.find_last_of("/\\");
+            if (pos != std::string::npos) filename = filename.substr(pos + 1);
+
+            if (ImGui::RadioButton(filename.c_str(), state.selectedModelIndex == i)) {
+                state.selectedModelIndex = i;
+            }
+        }
+    } else {
+        ImGui::TextDisabled("No .obj files found");
+    }
+
+    ImGui::Separator();
+
+    // Custom path input
+    static char customPath[256] = "";
+    ImGui::InputText("Path", customPath, sizeof(customPath));
+
+    // Settings
+    const char* texNames[] = { "Checkerboard", "Gradient", "White" };
+    ImGui::Combo("Texture", &state.modelTexture, texNames, 3);
+    ImGui::DragFloat("Scale", &state.modelScale, 0.05f, 0.01f, 50.0f);
+
+    ImGui::Separator();
+
+    // Load buttons
+    if (!state.availableModels.empty()) {
+        if (ImGui::Button("Load Selected", ImVec2(-1, 0))) {
+            state.pendingModelPath = state.availableModels[state.selectedModelIndex];
+            state.modelLoadRequested = true;
+        }
+    }
+
+    if (customPath[0] != '\0') {
+        if (ImGui::Button("Load from Path", ImVec2(-1, 0))) {
+            state.pendingModelPath = customPath;
+            state.modelLoadRequested = true;
+        }
+    }
+
+    ImGui::End();
 }
 
 } // namespace Genesis

@@ -14,6 +14,7 @@
 #include "renderer/Camera.h"
 #include "renderer/Skybox.h"
 #include "renderer/ShadowMap.h"
+#include "renderer/ViewportFramebuffer.h"
 #include "ui/ImGuiOverlay.h"
 #include "core/Types.h"
 
@@ -70,9 +71,10 @@ private:
     VulkanDescriptors m_descriptors;
     Camera            m_camera;
     Skybox            m_skybox;
-    ShadowMap         m_shadowMap;
-    ImGuiOverlay      m_imgui;
-    ImGuiState        m_imguiState;
+    ShadowMap            m_shadowMap;
+    ViewportFramebuffer  m_viewportFB;
+    ImGuiOverlay         m_imgui;
+    ImGuiState           m_imguiState;
 
     // Resources (meshes and textures, referenced by SceneObjects by index)
     std::vector<Mesh>           m_meshes;
