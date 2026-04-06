@@ -621,12 +621,11 @@ void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& 
             ImGui::Text("Index: %u", obj.meshIndex);
         }
 
-        // ─── Material section ───
+        // ─── Material section (PBR) ───
         if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
             // Texture selector
             const char* texNames[] = { "Checkerboard", "Gradient", "White" };
             i32 texIdx = static_cast<i32>(obj.textureIndex);
-            i32 texCount = static_cast<i32>(state.meshNames.size()); // approximate available
             if (texIdx < 3) {
                 ImGui::Combo("Texture", reinterpret_cast<int*>(&obj.textureIndex), texNames, 3);
             } else {
@@ -635,37 +634,40 @@ void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& 
 
             ImGui::Separator();
 
-            // Diffuse color (tints the texture)
-            ImGui::ColorEdit3("Diffuse", &obj.diffuseColor.x);
-
-            // Specular color
-            ImGui::ColorEdit3("Specular", &obj.specularColor.x);
-
-            // Shininess
-            ImGui::SliderFloat("Shininess", &obj.shininess, 1.0f, 256.0f, "%.0f");
+            // PBR properties
+            ImGui::ColorEdit3("Albedo", &obj.albedo.x);
+            ImGui::SliderFloat("Metallic", &obj.metallic, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("Roughness", &obj.roughness, 0.0f, 1.0f, "%.2f");
+            ImGui::SliderFloat("AO", &obj.ao, 0.0f, 1.0f, "%.2f");
 
             ImGui::Separator();
 
             // Material presets
-            if (ImGui::Button("Reset Material")) {
-                obj.diffuseColor  = glm::vec3(1.0f);
-                obj.specularColor = glm::vec3(1.0f);
-                obj.shininess     = 32.0f;
+            if (ImGui::Button("Default")) {
+                obj.albedo    = glm::vec3(1.0f);
+                obj.metallic  = 0.0f;
+                obj.roughness = 0.5f;
+                obj.ao        = 1.0f;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Matte")) {
-                obj.specularColor = glm::vec3(0.1f);
-                obj.shininess     = 4.0f;
+            if (ImGui::Button("Plastic")) {
+                obj.metallic  = 0.0f;
+                obj.roughness = 0.4f;
             }
             ImGui::SameLine();
-            if (ImGui::Button("Glossy")) {
-                obj.specularColor = glm::vec3(1.0f);
-                obj.shininess     = 128.0f;
+            if (ImGui::Button("Rough")) {
+                obj.metallic  = 0.0f;
+                obj.roughness = 0.9f;
             }
             ImGui::SameLine();
             if (ImGui::Button("Metal")) {
-                obj.specularColor = obj.diffuseColor;
-                obj.shininess     = 256.0f;
+                obj.metallic  = 1.0f;
+                obj.roughness = 0.2f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Mirror")) {
+                obj.metallic  = 1.0f;
+                obj.roughness = 0.05f;
             }
         }
     } else {

@@ -639,10 +639,11 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
                                     &descriptorSet, 0, nullptr);
 
             PushConstantData push{};
-            push.model         = obj.getModelMatrix();
-            push.diffuseColor  = obj.diffuseColor;
-            push.shininess     = obj.shininess;
-            push.specularColor = obj.specularColor;
+            push.model     = obj.getModelMatrix();
+            push.albedo    = obj.albedo;
+            push.metallic  = obj.metallic;
+            push.roughness = obj.roughness;
+            push.ao        = obj.ao;
             vkCmdPushConstants(cmd, m_pipeline.getPipelineLayout(),
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                sizeof(PushConstantData), &push);

@@ -9,13 +9,15 @@
 namespace Genesis {
 
 // Push constant data — sent per draw call, no buffer needed
-// 64 bytes vertex (model) + 32 bytes fragment (material) = 96 bytes total (within 128 byte limit)
+// 64 bytes vertex (model) + 32 bytes fragment (PBR material) = 96 bytes total (within 128 byte limit)
 struct PushConstantData {
-    glm::mat4 model;       // 64 bytes — vertex stage
-    glm::vec3 diffuseColor;  // 12 bytes — fragment stage
-    float     shininess;     //  4 bytes
-    glm::vec3 specularColor; // 12 bytes
-    float     _pad0;         //  4 bytes (alignment)
+    glm::mat4 model;      // 64 bytes — vertex stage
+    glm::vec3 albedo;     // 12 bytes — fragment stage: base color tint
+    float     metallic;   //  4 bytes — 0 = dielectric, 1 = metal
+    float     roughness;  //  4 bytes — 0 = mirror, 1 = diffuse
+    float     ao;         //  4 bytes — ambient occlusion
+    float     _pad0;      //  4 bytes
+    float     _pad1;      //  4 bytes
 };
 
 class SceneObject {
@@ -30,10 +32,11 @@ public:
     u32 meshIndex    = 0;
     u32 textureIndex = 0;
 
-    // Material properties
-    glm::vec3 diffuseColor  = glm::vec3(1.0f);  // Multiplied with texture color
-    glm::vec3 specularColor = glm::vec3(1.0f);  // Specular highlight tint
-    f32       shininess     = 32.0f;             // Specular exponent (higher = sharper)
+    // PBR Material properties
+    glm::vec3 albedo    = glm::vec3(1.0f);  // Base color (multiplied with texture)
+    f32       metallic  = 0.0f;             // 0 = dielectric (plastic), 1 = metal
+    f32       roughness = 0.5f;             // 0 = mirror smooth, 1 = fully rough
+    f32       ao        = 1.0f;             // Ambient occlusion (1 = no occlusion)
 
     // Optional per-frame animation
     f32 rotationSpeed = 0.0f; // degrees per second around Y axis
