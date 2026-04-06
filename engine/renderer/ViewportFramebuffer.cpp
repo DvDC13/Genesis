@@ -30,6 +30,11 @@ void ViewportFramebuffer::shutdown(VkDevice device) {
 
     destroyResources(device);
 
+    if (m_sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, m_sampler, nullptr);
+        m_sampler = VK_NULL_HANDLE;
+    }
+
     if (m_renderPass != VK_NULL_HANDLE) {
         vkDestroyRenderPass(device, m_renderPass, nullptr);
         m_renderPass = VK_NULL_HANDLE;

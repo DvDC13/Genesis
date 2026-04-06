@@ -282,43 +282,185 @@ void ImGuiOverlay::buildViewport(ImGuiState& state) {
 void ImGuiOverlay::buildSceneHierarchy(ImGuiState& state, std::vector<SceneObject>& objects) {
     ImGui::Begin("Scene");
 
-    // Header with object count
-    ImGui::Text("Objects: %u", static_cast<u32>(objects.size()));
+    i32 count = static_cast<i32>(objects.size());
+    state.ensureSelectionSize(count);
+
+    // Header
+    ImGui::Text("Objects: %d", count);
+    if (state.getSelectedCount() > 1) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(%d selected)", state.getSelectedCount());
+    }
     ImGui::Separator();
 
-    // Object list
-    for (i32 i = 0; i < static_cast<i32>(objects.size()); i++) {
-        const char* meshName = "Unknown";
-        if (objects[i].meshIndex < static_cast<u32>(state.meshNames.size())) {
-            meshName = state.meshNames[objects[i].meshIndex].c_str();
-        }
+    // Track if we need to break out after modifying the list
+    bool listModified = false;
 
-        // Icon-like prefix based on mesh type
-        std::string label = std::format("  {}##obj{}", meshName, i);
+    for (i32 i = 0; i < count && !listModified; i++) {
+        ImGui::PushID(i);
 
-        bool isSelected = (state.selectedObject == i);
-        if (ImGui::Selectable(label.c_str(), isSelected)) {
-            state.selectedObject = isSelected ? -1 : i;
-        }
-
-        // Right-click context menu
-        if (ImGui::BeginPopupContextItem()) {
-            if (ImGui::MenuItem("Delete")) {
-                objects.erase(objects.begin() + i);
-                if (state.selectedObject == i) state.selectedObject = -1;
-                else if (state.selectedObject > i) state.selectedObject--;
-                ImGui::EndPopup();
-                break; // list changed, exit loop
+        // ─── Renaming mode ───
+        if (m_renamingIndex == i) {
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputText("##rename", m_renameBuffer, sizeof(m_renameBuffer),
+                                 ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+                objects[i].name = m_renameBuffer;
+                m_renamingIndex = -1;
             }
-            if (ImGui::MenuItem("Duplicate")) {
+            // Cancel on Escape or click elsewhere
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape) ||
+                (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0))) {
+                m_renamingIndex = -1;
+            }
+            // Auto-focus the input on the first frame
+            if (ImGui::IsItemDeactivated() == false && ImGui::IsItemFocused() == false) {
+                ImGui::SetKeyboardFocusHere(-1);
+            }
+
+            ImGui::PopID();
+            continue;
+        }
+
+        // ─── Normal display ───
+        std::string label = std::format("  {}##obj", objects[i].name);
+
+        bool isSelected = state.selected[i];
+        if (ImGui::Selectable(label.c_str(), isSelected)) {
+            ImGuiIO& io = ImGui::GetIO();
+
+            if (io.KeyCtrl) {
+                // Ctrl+click: toggle individual selection
+                state.selected[i] = !state.selected[i];
+            } else if (io.KeyShift && state.lastClickedIndex >= 0) {
+                // Shift+click: range selection
+                i32 lo = std::min(state.lastClickedIndex, i);
+                i32 hi = std::max(state.lastClickedIndex, i);
+                for (i32 j = lo; j <= hi; j++) {
+                    state.selected[j] = true;
+                }
+            } else {
+                // Normal click: select only this one
+                state.clearSelection();
+                state.ensureSelectionSize(count);
+                state.selected[i] = true;
+            }
+            state.lastClickedIndex = i;
+        }
+
+        // Double-click to rename
+        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+            m_renamingIndex = i;
+            strncpy(m_renameBuffer, objects[i].name.c_str(), sizeof(m_renameBuffer) - 1);
+            m_renameBuffer[sizeof(m_renameBuffer) - 1] = '\0';
+        }
+
+        // ─── Drag source (reorder) ───
+        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+            ImGui::SetDragDropPayload("SCENE_OBJ", &i, sizeof(i32));
+            ImGui::Text("Move: %s", objects[i].name.c_str());
+            ImGui::EndDragDropSource();
+        }
+
+        // ─── Drop target (reorder) ───
+        if (ImGui::BeginDragDropTarget()) {
+            if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("SCENE_OBJ")) {
+                i32 srcIdx = *static_cast<const i32*>(payload->Data);
+                if (srcIdx != i) {
+                    // Move the object from srcIdx to i
+                    SceneObject moved = std::move(objects[srcIdx]);
+                    objects.erase(objects.begin() + srcIdx);
+                    i32 insertAt = (srcIdx < i) ? i - 1 : i;
+                    objects.insert(objects.begin() + insertAt, std::move(moved));
+
+                    // Update selection
+                    state.clearSelection();
+                    state.ensureSelectionSize(static_cast<i32>(objects.size()));
+                    state.selected[insertAt] = true;
+                    state.lastClickedIndex = insertAt;
+                    listModified = true;
+                }
+            }
+            ImGui::EndDragDropTarget();
+        }
+
+        // ─── Right-click context menu ───
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Rename", "F2")) {
+                m_renamingIndex = i;
+                strncpy(m_renameBuffer, objects[i].name.c_str(), sizeof(m_renameBuffer) - 1);
+                m_renameBuffer[sizeof(m_renameBuffer) - 1] = '\0';
+            }
+            if (ImGui::MenuItem("Duplicate", "Ctrl+D")) {
                 SceneObject copy = objects[i];
-                copy.position += glm::vec3(1.0f, 0.0f, 0.0f); // offset slightly
+                copy.name = objects[i].name + " Copy";
+                copy.position += glm::vec3(1.0f, 0.0f, 0.0f);
                 objects.insert(objects.begin() + i + 1, copy);
-                state.selectedObject = i + 1;
+                state.clearSelection();
+                state.ensureSelectionSize(static_cast<i32>(objects.size()));
+                state.selected[i + 1] = true;
+                state.lastClickedIndex = i + 1;
+                listModified = true;
                 ImGui::EndPopup();
+                ImGui::PopID();
+                break;
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Delete", "Del")) {
+                objects.erase(objects.begin() + i);
+                state.selected.erase(state.selected.begin() + i);
+                if (state.lastClickedIndex >= static_cast<i32>(objects.size()))
+                    state.lastClickedIndex = -1;
+                listModified = true;
+                ImGui::EndPopup();
+                ImGui::PopID();
+                break;
+            }
+            if (state.getSelectedCount() > 1 && ImGui::MenuItem("Delete Selected")) {
+                for (i32 j = static_cast<i32>(objects.size()) - 1; j >= 0; j--) {
+                    if (state.selected[j]) {
+                        objects.erase(objects.begin() + j);
+                    }
+                }
+                state.selected.clear();
+                state.lastClickedIndex = -1;
+                listModified = true;
+                ImGui::EndPopup();
+                ImGui::PopID();
                 break;
             }
             ImGui::EndPopup();
+        }
+
+        ImGui::PopID();
+    }
+
+    // Keyboard shortcuts when Scene panel is focused
+    if (ImGui::IsWindowFocused()) {
+        // Delete key
+        if (ImGui::IsKeyPressed(ImGuiKey_Delete)) {
+            for (i32 j = static_cast<i32>(objects.size()) - 1; j >= 0; j--) {
+                if (j < static_cast<i32>(state.selected.size()) && state.selected[j]) {
+                    objects.erase(objects.begin() + j);
+                }
+            }
+            state.selected.clear();
+            state.lastClickedIndex = -1;
+        }
+
+        // F2 to rename first selected
+        if (ImGui::IsKeyPressed(ImGuiKey_F2)) {
+            i32 first = state.getFirstSelected();
+            if (first >= 0) {
+                m_renamingIndex = first;
+                strncpy(m_renameBuffer, objects[first].name.c_str(), sizeof(m_renameBuffer) - 1);
+                m_renameBuffer[sizeof(m_renameBuffer) - 1] = '\0';
+            }
+        }
+
+        // Ctrl+A to select all
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A)) {
+            state.ensureSelectionSize(static_cast<i32>(objects.size()));
+            std::fill(state.selected.begin(), state.selected.end(), true);
         }
     }
 
@@ -328,15 +470,16 @@ void ImGuiOverlay::buildSceneHierarchy(ImGuiState& state, std::vector<SceneObjec
 void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& objects) {
     ImGui::Begin("Properties");
 
-    if (state.selectedObject >= 0 && state.selectedObject < static_cast<i32>(objects.size())) {
-        SceneObject& obj = objects[state.selectedObject];
+    i32 sel = state.getFirstSelected();
+    if (sel >= 0 && sel < static_cast<i32>(objects.size())) {
+        SceneObject& obj = objects[sel];
 
         // Object header
         const char* meshName = "Unknown";
         if (obj.meshIndex < static_cast<u32>(state.meshNames.size())) {
             meshName = state.meshNames[obj.meshIndex].c_str();
         }
-        ImGui::Text("Object %d: %s", state.selectedObject, meshName);
+        ImGui::Text("%s  (%s)", obj.name.c_str(), meshName);
         ImGui::Separator();
 
         // ─── Transform section ───

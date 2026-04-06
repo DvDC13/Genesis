@@ -199,6 +199,7 @@ void Renderer::createScene() {
 
     // Center: spinning checkerboard cube
     SceneObject centerCube;
+    centerCube.name          = "Cube";
     centerCube.position      = { 0.0f, 0.0f, 0.0f };
     centerCube.rotationSpeed = 30.0f;
     centerCube.meshIndex     = 0;
@@ -207,6 +208,7 @@ void Renderer::createScene() {
 
     // Left: rainbow sphere
     SceneObject sphere;
+    sphere.name          = "Sphere";
     sphere.position      = { -2.5f, 0.0f, 0.0f };
     sphere.rotationSpeed = 15.0f;
     sphere.meshIndex     = 1;
@@ -215,6 +217,7 @@ void Renderer::createScene() {
 
     // Right: white torus spinning
     SceneObject torus;
+    torus.name           = "Torus";
     torus.position      = { 2.5f, 0.0f, 0.0f };
     torus.rotation       = { 30.0f, 0.0f, 0.0f };
     torus.rotationSpeed = -40.0f;
@@ -224,6 +227,7 @@ void Renderer::createScene() {
 
     // Floor: large flat checkerboard cube
     SceneObject floor;
+    floor.name           = "Floor";
     floor.position     = { 0.0f, -1.5f, 0.0f };
     floor.scale        = { 12.0f, 0.1f, 12.0f };
     floor.meshIndex    = 0;
@@ -232,6 +236,7 @@ void Renderer::createScene() {
 
     // Back-left: small gradient cube
     SceneObject backCube;
+    backCube.name          = "Small Cube";
     backCube.position      = { -1.5f, 1.0f, -2.0f };
     backCube.scale         = { 0.6f, 0.6f, 0.6f };
     backCube.rotationSpeed = 60.0f;
@@ -241,6 +246,7 @@ void Renderer::createScene() {
 
     // Back-right: white sphere
     SceneObject whiteSphere;
+    whiteSphere.name         = "White Sphere";
     whiteSphere.position     = { 1.5f, 0.8f, -2.0f };
     whiteSphere.meshIndex    = 1;
     whiteSphere.textureIndex = 2;
@@ -248,6 +254,7 @@ void Renderer::createScene() {
 
     // Far: gradient torus floating
     SceneObject farTorus;
+    farTorus.name          = "Far Torus";
     farTorus.position      = { 0.0f, 1.5f, -3.5f };
     farTorus.rotation       = { 45.0f, 0.0f, 0.0f };
     farTorus.rotationSpeed = 25.0f;
@@ -389,8 +396,8 @@ void Renderer::drawFrame() {
 void Renderer::shutdown() {
     vkDeviceWaitIdle(m_device.getDevice());
 
-    m_imgui.shutdown(m_device.getDevice());
     m_viewportFB.shutdown(m_device.getDevice());
+    m_imgui.shutdown(m_device.getDevice());
     m_skybox.shutdown(m_device.getDevice());
     m_shadowMap.shutdown(m_device.getDevice());
     m_syncObjects.shutdown(m_device.getDevice());
@@ -730,6 +737,7 @@ void Renderer::processModelLoadRequest() {
 
     // Create a new scene object at the origin
     SceneObject obj;
+    obj.name         = meshName;
     obj.position     = { 0.0f, 0.0f, 0.0f };
     obj.scale        = glm::vec3(scale);
     obj.meshIndex    = meshIdx;

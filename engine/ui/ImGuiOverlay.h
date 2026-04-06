@@ -25,8 +25,28 @@ struct ImGuiState {
     u32 drawCalls      = 0;
     const char* gpuName = "";
 
-    // Selected object
-    i32 selectedObject = -1;
+    // Selection (supports multi-select with Ctrl/Shift)
+    std::vector<bool> selected;  // parallel to objects vector
+    i32 lastClickedIndex = -1;   // for Shift-range selection
+
+    // Helpers
+    i32 getFirstSelected() const {
+        for (i32 i = 0; i < static_cast<i32>(selected.size()); i++)
+            if (selected[i]) return i;
+        return -1;
+    }
+    i32 getSelectedCount() const {
+        i32 count = 0;
+        for (bool s : selected) if (s) count++;
+        return count;
+    }
+    void clearSelection() {
+        std::fill(selected.begin(), selected.end(), false);
+        lastClickedIndex = -1;
+    }
+    void ensureSelectionSize(i32 objectCount) {
+        selected.resize(static_cast<size_t>(objectCount), false);
+    }
 
     // Model loading request (set by UI, consumed by Renderer)
     std::string pendingModelPath;
@@ -74,6 +94,8 @@ private:
 
     VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
     bool m_firstFrame = true;
+    i32  m_renamingIndex = -1;     // which object is being renamed (-1 = none)
+    char m_renameBuffer[128] = {}; // text input buffer for renaming
 };
 
 } // namespace Genesis

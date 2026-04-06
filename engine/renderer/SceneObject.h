@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <string>
 
 namespace Genesis {
 
@@ -14,6 +15,8 @@ struct PushConstantData {
 
 class SceneObject {
 public:
+    std::string name;
+
     glm::vec3 position = glm::vec3(0.0f);
     glm::vec3 rotation = glm::vec3(0.0f); // Euler angles in degrees (pitch, yaw, roll)
     glm::vec3 scale    = glm::vec3(1.0f);
