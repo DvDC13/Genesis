@@ -26,6 +26,15 @@ public:
 
     glm::vec3 getPosition() const { return m_position; }
 
+    // Camera presets (like Blender numpad views)
+    void setFront()       { m_position = {0, 0, 8};    m_yaw = -90.0f; m_pitch = 0.0f;   updateVectors(); }
+    void setBack()        { m_position = {0, 0, -8};   m_yaw =  90.0f; m_pitch = 0.0f;   updateVectors(); }
+    void setRight()       { m_position = {8, 0, 0};    m_yaw = -180.0f; m_pitch = 0.0f;  updateVectors(); }
+    void setLeft()        { m_position = {-8, 0, 0};   m_yaw =  0.0f;  m_pitch = 0.0f;   updateVectors(); }
+    void setTop()         { m_position = {0, 8, 0.01f}; m_yaw = -90.0f; m_pitch = -89.0f; updateVectors(); }
+    void setBottom()      { m_position = {0, -8, 0.01f}; m_yaw = -90.0f; m_pitch = 89.0f; updateVectors(); }
+    void setPerspective() { m_position = {3, 3, 5};    m_yaw = -120.0f; m_pitch = -20.0f; updateVectors(); }
+
 private:
     void updateVectors();
 

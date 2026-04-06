@@ -13,7 +13,7 @@ public:
     void init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
               const std::string& vertPath, const std::string& fragPath,
               VkDescriptorSetLayout descriptorSetLayout,
-              u32 pushConstantSize = 0);
+              u32 pushConstantSize = 0, bool wireframe = false);
     void shutdown(VkDevice device);
 
     VkPipeline       getPipeline()       const { return m_pipeline; }

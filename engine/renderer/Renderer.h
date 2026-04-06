@@ -66,6 +66,7 @@ private:
     VulkanDevice      m_device;
     VulkanSwapchain   m_swapchain;
     VulkanPipeline    m_pipeline;
+    VulkanPipeline    m_wireframePipeline;
     VulkanCommandPool m_commandPool;
     VulkanSyncObjects m_syncObjects;
     VulkanDescriptors m_descriptors;

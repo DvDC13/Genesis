@@ -6,6 +6,7 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 #include <ImGuizmo.h>
+#include <GLFW/glfw3.h>
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/type_ptr.hpp>
@@ -42,6 +43,19 @@ void ImGuiOverlay::init(GLFWwindow* window, VkInstance instance,
 
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.IniFilename = nullptr;  // Don't save/load layout from disk — always use our DockBuilder layout
+
+    // ─── DPI-aware scaling ───
+    float xScale = 1.0f, yScale = 1.0f;
+    glfwGetWindowContentScale(window, &xScale, &yScale);
+    float dpiScale = std::max(xScale, yScale);
+    // Ensure a minimum comfortable size (1.25x), bump slightly larger
+    dpiScale = std::max(dpiScale, 1.25f) * 1.1f;
+
+    // Load default font at scaled size (default is 13px, too small on HiDPI)
+    io.Fonts->Clear();
+    io.Fonts->AddFontDefault();
+    io.FontGlobalScale = dpiScale;
 
     // Editor-style dark theme
     ImGui::StyleColorsDark();
@@ -56,6 +70,7 @@ void ImGuiOverlay::init(GLFWwindow* window, VkInstance instance,
     style.WindowPadding    = ImVec2(8.0f, 8.0f);
     style.ItemSpacing      = ImVec2(8.0f, 4.0f);
     style.IndentSpacing    = 16.0f;
+    style.ScaleAllSizes(dpiScale);
 
     // Blender-inspired colors
     auto& colors = style.Colors;
@@ -173,13 +188,13 @@ void ImGuiOverlay::buildDockspace() {
         ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
         ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
 
-        // Split: left panel (20%) | center+right
+        // Split: left panel (22%) | center+right
         ImGuiID dockLeft, dockCenterRight;
-        ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.18f, &dockLeft, &dockCenterRight);
+        ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.22f, &dockLeft, &dockCenterRight);
 
-        // Split center+right: center | right panel (22%)
+        // Split center+right: center | right panel (25%)
         ImGuiID dockCenter, dockRight;
-        ImGui::DockBuilderSplitNode(dockCenterRight, ImGuiDir_Right, 0.22f, &dockRight, &dockCenter);
+        ImGui::DockBuilderSplitNode(dockCenterRight, ImGuiDir_Right, 0.25f, &dockRight, &dockCenter);
 
         // Split center: viewport | bottom stats bar (small)
         ImGuiID dockViewport, dockBottom;
@@ -262,11 +277,14 @@ void ImGuiOverlay::buildViewport(ImGuiState& state) {
     if (viewportSize.x < 64.0f) viewportSize.x = 64.0f;
     if (viewportSize.y < 64.0f) viewportSize.y = 64.0f;
 
-    // Check if viewport was resized
+    // Check if viewport was resized (4px tolerance to avoid resize spam)
     u32 newW = static_cast<u32>(viewportSize.x);
     u32 newH = static_cast<u32>(viewportSize.y);
-    if (newW != static_cast<u32>(state.viewportWidth) ||
-        newH != static_cast<u32>(state.viewportHeight)) {
+    u32 oldW = static_cast<u32>(state.viewportWidth);
+    u32 oldH = static_cast<u32>(state.viewportHeight);
+    i32 dw = static_cast<i32>(newW) - static_cast<i32>(oldW);
+    i32 dh = static_cast<i32>(newH) - static_cast<i32>(oldH);
+    if (dw * dw + dh * dh > 16) { // more than ~4px change
         state.viewportResized   = true;
         state.newViewportWidth  = newW;
         state.newViewportHeight = newH;
@@ -289,6 +307,61 @@ void ImGuiOverlay::buildViewport(ImGuiState& state) {
     // Set ImGuizmo drawing rect to match the viewport image
     ImGuizmo::SetDrawlist();
     ImGuizmo::SetRect(vpMin.x, vpMin.y, viewportSize.x, viewportSize.y);
+
+    // ─── Draw ground grid via ImGuizmo ───
+    if (state.showGrid) {
+        glm::mat4 gizmoProj = state.projectionMatrix;
+        gizmoProj[1][1] *= -1.0f; // Un-flip Vulkan Y for ImGuizmo
+        glm::mat4 identityMatrix = glm::mat4(1.0f);
+        ImGuizmo::DrawGrid(
+            glm::value_ptr(state.viewMatrix),
+            glm::value_ptr(gizmoProj),
+            glm::value_ptr(identityMatrix),
+            20.0f  // grid size
+        );
+    }
+
+    // ─── Viewport overlay toolbar (top-left corner) ───
+    {
+        ImVec2 toolbarPos(vpMin.x + 8.0f, vpMin.y + 8.0f);
+        ImGui::SetCursorScreenPos(toolbarPos);
+
+        // Transparent background for toolbar buttons
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.15f, 0.15f, 0.15f, 0.75f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.30f, 0.30f, 0.85f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.25f, 0.35f, 0.50f, 0.90f));
+
+        ImVec4 onColor(0.25f, 0.50f, 0.75f, 0.85f);
+
+        // Grid toggle
+        bool gridOn = state.showGrid;
+        if (gridOn) ImGui::PushStyleColor(ImGuiCol_Button, onColor);
+        if (ImGui::SmallButton("Grid")) state.showGrid = !state.showGrid;
+        if (gridOn) ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+
+        // Wireframe toggle
+        bool wireOn = state.wireframeMode;
+        if (wireOn) ImGui::PushStyleColor(ImGuiCol_Button, onColor);
+        if (ImGui::SmallButton("Wire")) state.wireframeMode = !state.wireframeMode;
+        if (wireOn) ImGui::PopStyleColor();
+
+        ImGui::SameLine();
+        ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+        ImGui::SameLine();
+
+        // Camera presets
+        if (ImGui::SmallButton("Front"))  state.cameraPresetRequest = 0;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Right"))  state.cameraPresetRequest = 2;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Top"))    state.cameraPresetRequest = 4;
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Persp"))  state.cameraPresetRequest = 6;
+
+        ImGui::PopStyleColor(3); // Button colors
+    }
 
     ImGui::End();
 }

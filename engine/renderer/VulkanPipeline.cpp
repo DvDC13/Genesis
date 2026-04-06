@@ -10,7 +10,7 @@ namespace Genesis {
 void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D extent,
                           const std::string& vertPath, const std::string& fragPath,
                           VkDescriptorSetLayout descriptorSetLayout,
-                          u32 pushConstantSize) {
+                          u32 pushConstantSize, bool wireframe) {
     auto vertCode = readFile(vertPath);
     auto fragCode = readFile(fragPath);
 
@@ -65,7 +65,7 @@ void VulkanPipeline::init(VkDevice device, VkRenderPass renderPass, VkExtent2D e
     // Rasterizer
     VkPipelineRasterizationStateCreateInfo rasterizer{};
     rasterizer.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterizer.polygonMode = wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
     rasterizer.lineWidth   = 1.0f;
     rasterizer.cullMode    = VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE; // GLM uses right-handed coords

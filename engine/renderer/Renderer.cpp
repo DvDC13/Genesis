@@ -105,7 +105,19 @@ void Renderer::init(Window& window) {
         "phong.vert.spv",
         "phong.frag.spv",
         m_descriptors.getLayout(),
-        sizeof(PushConstantData)
+        sizeof(PushConstantData),
+        false  // filled
+    );
+
+    m_wireframePipeline.init(
+        m_device.getDevice(),
+        m_viewportFB.getRenderPass(),
+        m_viewportFB.getExtent(),
+        "phong.vert.spv",
+        "phong.frag.spv",
+        m_descriptors.getLayout(),
+        sizeof(PushConstantData),
+        true  // wireframe
     );
 
     // 9. Create synchronization objects
@@ -318,6 +330,20 @@ void Renderer::drawFrame() {
         m_imguiState.modelLoadRequested = false;
     }
 
+    // Process camera preset request
+    if (m_imguiState.cameraPresetRequest >= 0) {
+        switch (m_imguiState.cameraPresetRequest) {
+            case 0: m_camera.setFront();       break;
+            case 1: m_camera.setBack();        break;
+            case 2: m_camera.setRight();       break;
+            case 3: m_camera.setLeft();        break;
+            case 4: m_camera.setTop();         break;
+            case 5: m_camera.setBottom();      break;
+            case 6: m_camera.setPerspective(); break;
+        }
+        m_imguiState.cameraPresetRequest = -1;
+    }
+
     // Wait for the previous frame using this slot to finish
     VkFence inFlightFence = m_syncObjects.getInFlightFence(m_currentFrame);
     vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
@@ -403,6 +429,7 @@ void Renderer::shutdown() {
     m_syncObjects.shutdown(m_device.getDevice());
     m_commandPool.shutdown(m_device.getDevice());
     m_pipeline.shutdown(m_device.getDevice());
+    m_wireframePipeline.shutdown(m_device.getDevice());
     m_descriptors.shutdown(m_device.getDevice());
 
     for (auto& ubo : m_uniformBuffers) {
@@ -602,7 +629,10 @@ void Renderer::recordCommandBuffer(VkCommandBuffer cmd, u32 imageIndex) {
         m_skybox.render(cmd, m_currentFrame);
 
         // Bind scene pipeline and draw each scene object with its own texture
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline.getPipeline());
+        VkPipeline activePipeline = m_imguiState.wireframeMode
+            ? m_wireframePipeline.getPipeline()
+            : m_pipeline.getPipeline();
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, activePipeline);
         for (const auto& obj : m_objects) {
             VkDescriptorSet descriptorSet = m_descriptors.getSet(m_currentFrame, obj.textureIndex);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,

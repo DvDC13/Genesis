@@ -82,6 +82,13 @@ struct ImGuiState {
     f32  gizmoSnapRotate    = 15.0f;  // snap increment for rotate (degrees)
     f32  gizmoSnapScale     = 0.25f;  // snap increment for scale
     bool gizmoIsUsing       = false;  // true while user drags a gizmo
+
+    // Viewport controls
+    bool showGrid     = true;
+    bool wireframeMode = false;
+
+    // Camera preset request (-1 = none, 0-6 = Front/Back/Right/Left/Top/Bottom/Perspective)
+    i32 cameraPresetRequest = -1;
 };
 
 class ImGuiOverlay {
