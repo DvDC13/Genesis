@@ -5,6 +5,7 @@
 
 #include <vulkan/vulkan.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/type_ptr.hpp>
 #include <vector>
 #include <string>
 
@@ -69,6 +70,18 @@ struct ImGuiState {
     bool viewportResized = false; // true when viewport panel changed size
     u32  newViewportWidth  = 0;
     u32  newViewportHeight = 0;
+
+    // Camera matrices (set by Renderer each frame for gizmos)
+    glm::mat4 viewMatrix       = glm::mat4(1.0f);
+    glm::mat4 projectionMatrix = glm::mat4(1.0f);
+
+    // Gizmo state: 0 = Translate, 1 = Rotate, 2 = Scale
+    i32  gizmoOperation = 0;
+    bool gizmoUsingSnap = false;
+    f32  gizmoSnapTranslate = 0.5f;   // snap increment for translate
+    f32  gizmoSnapRotate    = 15.0f;  // snap increment for rotate (degrees)
+    f32  gizmoSnapScale     = 0.25f;  // snap increment for scale
+    bool gizmoIsUsing       = false;  // true while user drags a gizmo
 };
 
 class ImGuiOverlay {
@@ -91,6 +104,7 @@ private:
     void buildProperties(ImGuiState& state, std::vector<SceneObject>& objects);
     void buildStats(ImGuiState& state);
     void buildModelLoader(ImGuiState& state);
+    void buildGizmo(ImGuiState& state, std::vector<SceneObject>& objects);
 
     VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
     bool m_firstFrame = true;

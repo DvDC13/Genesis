@@ -5,6 +5,11 @@
 #include <imgui_internal.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
+#include <ImGuizmo.h>
+
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/matrix_decompose.hpp>
 
 #include <stdexcept>
 #include <format>
@@ -116,9 +121,11 @@ void ImGuiOverlay::newFrame() {
 }
 
 void ImGuiOverlay::buildUI(ImGuiState& state, std::vector<SceneObject>& objects) {
+    ImGuizmo::BeginFrame();
     buildDockspace();
     buildMenuBar(state);
     buildViewport(state);
+    buildGizmo(state, objects);
     buildSceneHierarchy(state, objects);
     buildProperties(state, objects);
     buildStats(state);
@@ -267,6 +274,9 @@ void ImGuiOverlay::buildViewport(ImGuiState& state) {
         state.viewportHeight    = viewportSize.y;
     }
 
+    // Store viewport screen-space position for ImGuizmo
+    ImVec2 vpMin = ImGui::GetCursorScreenPos();
+
     // Display the 3D scene as a texture
     if (state.viewportTexture != VK_NULL_HANDLE) {
         ImTextureID texId = reinterpret_cast<ImTextureID>(state.viewportTexture);
@@ -275,6 +285,10 @@ void ImGuiOverlay::buildViewport(ImGuiState& state) {
 
     // Track if the viewport is hovered (for camera input)
     state.viewportHovered = ImGui::IsItemHovered();
+
+    // Set ImGuizmo drawing rect to match the viewport image
+    ImGuizmo::SetDrawlist();
+    ImGuizmo::SetRect(vpMin.x, vpMin.y, viewportSize.x, viewportSize.y);
 
     ImGui::End();
 }
@@ -482,6 +496,37 @@ void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& 
         ImGui::Text("%s  (%s)", obj.name.c_str(), meshName);
         ImGui::Separator();
 
+        // ─── Gizmo mode selector ───
+        {
+            const char* modes[] = { "Translate (W)", "Rotate (E)", "Scale (R)" };
+            ImVec4 activeColor(0.26f, 0.59f, 0.98f, 1.0f);
+            ImVec4 normalColor(0.30f, 0.30f, 0.30f, 1.0f);
+
+            for (i32 m = 0; m < 3; m++) {
+                if (m > 0) ImGui::SameLine();
+                bool isActive = (state.gizmoOperation == m);
+                if (isActive) ImGui::PushStyleColor(ImGuiCol_Button, activeColor);
+                else          ImGui::PushStyleColor(ImGuiCol_Button, normalColor);
+
+                if (ImGui::Button(modes[m])) {
+                    state.gizmoOperation = m;
+                }
+                ImGui::PopStyleColor();
+            }
+
+            ImGui::Checkbox("Snap", &state.gizmoUsingSnap);
+            if (state.gizmoUsingSnap) {
+                ImGui::SameLine();
+                if (state.gizmoOperation == 0)
+                    ImGui::DragFloat("##snap", &state.gizmoSnapTranslate, 0.1f, 0.1f, 10.0f, "%.1f");
+                else if (state.gizmoOperation == 1)
+                    ImGui::DragFloat("##snap", &state.gizmoSnapRotate, 1.0f, 1.0f, 90.0f, "%.0f deg");
+                else
+                    ImGui::DragFloat("##snap", &state.gizmoSnapScale, 0.05f, 0.05f, 5.0f, "%.2f");
+            }
+            ImGui::Separator();
+        }
+
         // ─── Transform section ───
         if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::DragFloat3("Position", &obj.position.x, 0.05f);
@@ -604,6 +649,78 @@ void ImGuiOverlay::buildModelLoader(ImGuiState& state) {
     }
 
     ImGui::End();
+}
+
+void ImGuiOverlay::buildGizmo(ImGuiState& state, std::vector<SceneObject>& objects) {
+    i32 sel = state.getFirstSelected();
+    if (sel < 0 || sel >= static_cast<i32>(objects.size())) {
+        state.gizmoIsUsing = false;
+        return;
+    }
+
+    // ─── Keyboard shortcuts (only when viewport is hovered and not renaming) ───
+    if (state.viewportHovered && m_renamingIndex < 0) {
+        if (ImGui::IsKeyPressed(ImGuiKey_W)) state.gizmoOperation = 0; // Translate
+        if (ImGui::IsKeyPressed(ImGuiKey_E)) state.gizmoOperation = 1; // Rotate
+        if (ImGui::IsKeyPressed(ImGuiKey_R)) state.gizmoOperation = 2; // Scale
+    }
+
+    // Map our int to ImGuizmo operation
+    ImGuizmo::OPERATION op = ImGuizmo::TRANSLATE;
+    if (state.gizmoOperation == 1) op = ImGuizmo::ROTATE;
+    if (state.gizmoOperation == 2) op = ImGuizmo::SCALE;
+
+    SceneObject& obj = objects[sel];
+
+    // ─── Build model matrix using ImGuizmo's own convention ───
+    // This ensures compose→decompose round-trip is lossless (no Euler mismatch)
+    float translation[3] = { obj.position.x, obj.position.y, obj.position.z };
+    float rotation[3]    = { obj.rotation.x, obj.rotation.y, obj.rotation.z };
+    float scale[3]       = { obj.scale.x,    obj.scale.y,    obj.scale.z };
+
+    glm::mat4 modelMatrix(1.0f);
+    ImGuizmo::RecomposeMatrixFromComponents(
+        translation, rotation, scale,
+        glm::value_ptr(modelMatrix)
+    );
+
+    // ─── Un-flip Vulkan Y-axis for ImGuizmo (it expects OpenGL conventions) ───
+    glm::mat4 gizmoProj = state.projectionMatrix;
+    gizmoProj[1][1] *= -1.0f;  // Undo the Vulkan Y-flip
+
+    // Snap values
+    glm::vec3 snapValues(0.0f);
+    if (state.gizmoUsingSnap) {
+        if (state.gizmoOperation == 0) snapValues = glm::vec3(state.gizmoSnapTranslate);
+        if (state.gizmoOperation == 1) snapValues = glm::vec3(state.gizmoSnapRotate);
+        if (state.gizmoOperation == 2) snapValues = glm::vec3(state.gizmoSnapScale);
+    }
+
+    // Manipulate the gizmo
+    bool changed = ImGuizmo::Manipulate(
+        glm::value_ptr(state.viewMatrix),
+        glm::value_ptr(gizmoProj),
+        op,
+        ImGuizmo::LOCAL,
+        glm::value_ptr(modelMatrix),
+        nullptr,  // deltaMatrix
+        state.gizmoUsingSnap ? glm::value_ptr(snapValues) : nullptr
+    );
+
+    state.gizmoIsUsing = ImGuizmo::IsUsing();
+
+    // If the gizmo was changed, decompose back into position/rotation/scale
+    if (changed) {
+        float newTranslation[3], newRotation[3], newScale[3];
+        ImGuizmo::DecomposeMatrixToComponents(
+            glm::value_ptr(modelMatrix),
+            newTranslation, newRotation, newScale
+        );
+
+        obj.position = glm::vec3(newTranslation[0], newTranslation[1], newTranslation[2]);
+        obj.rotation = glm::vec3(newRotation[0], newRotation[1], newRotation[2]);
+        obj.scale    = glm::vec3(newScale[0], newScale[1], newScale[2]);
+    }
 }
 
 } // namespace Genesis

@@ -466,6 +466,10 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     ubo.lightSpaceMatrix = lightSpaceMatrix;
     memcpy(m_uniformBuffers[frameIndex].mapped, &ubo, sizeof(ubo));
 
+    // Pass camera matrices to UI state (for gizmos)
+    m_imguiState.viewMatrix       = ubo.view;
+    m_imguiState.projectionMatrix = ubo.projection;
+
     // Update shadow map's light VP buffer
     m_shadowMap.updateLightMatrix(frameIndex, lightSpaceMatrix);
 
@@ -492,9 +496,9 @@ void Renderer::processInput(f32 deltaTime) {
     }
     tabWasPressed = tabPressed;
 
-    // Camera movement: either cursor captured OR viewport hovered with right mouse held
-    bool canMoveCamera = m_cursorCaptured || m_imguiState.viewportHovered;
-    if (!canMoveCamera) return;
+    // Camera keyboard movement only when cursor is captured (Tab mode)
+    // In editor mode, W/E/R are gizmo shortcuts instead
+    if (!m_cursorCaptured) return;
 
     if (m_window->isKeyPressed(GLFW_KEY_W))
         m_camera.processKeyboard(CameraDirection::Forward, deltaTime);

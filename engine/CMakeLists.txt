@@ -29,6 +29,7 @@ target_include_directories(GenesisEngine
 find_package(Stb REQUIRED)
 find_package(tinyobjloader CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
+find_package(imguizmo CONFIG REQUIRED)
 
 target_include_directories(GenesisEngine
     PRIVATE ${Stb_INCLUDE_DIR}
@@ -40,6 +41,7 @@ target_link_libraries(GenesisEngine
     PUBLIC  glm::glm
     PRIVATE tinyobjloader::tinyobjloader
     PUBLIC  imgui::imgui
+    PUBLIC  imguizmo::imguizmo
 )
 
 # Enable validation layers in debug builds
