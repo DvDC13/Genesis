@@ -682,13 +682,82 @@ void ImGuiOverlay::buildProperties(ImGuiState& state, std::vector<SceneObject>& 
 
     if (ImGui::CollapsingHeader("Directional Light", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::SliderFloat3("Direction", &state.lightDir.x, -1.0f, 1.0f);
-        ImGui::ColorEdit3("Color", &state.lightColor.x);
+        ImGui::ColorEdit3("Color##dir", &state.lightColor.x);
         ImGui::SliderFloat("Ambient", &state.ambientStrength, 0.0f, 1.0f);
 
         // Normalize light direction after editing
         float len = glm::length(state.lightDir);
         if (len > 0.001f) {
             state.lightDir /= len;
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Point Lights", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Add button
+        if (state.pointLights.size() < 8) {
+            if (ImGui::Button("Add Point Light")) {
+                PointLight pl;
+                pl.name = std::format("Point Light {}", state.pointLights.size() + 1);
+                state.pointLights.push_back(pl);
+                state.selectedPointLight = static_cast<i32>(state.pointLights.size()) - 1;
+            }
+        } else {
+            ImGui::TextDisabled("Max 8 point lights");
+        }
+
+        ImGui::Separator();
+
+        // List of point lights
+        for (i32 i = 0; i < static_cast<i32>(state.pointLights.size()); i++) {
+            ImGui::PushID(i);
+
+            bool isSelected = (state.selectedPointLight == i);
+            if (ImGui::Selectable(state.pointLights[i].name.c_str(), isSelected)) {
+                state.selectedPointLight = i;
+            }
+
+            ImGui::PopID();
+        }
+
+        // Edit selected point light
+        if (state.selectedPointLight >= 0 &&
+            state.selectedPointLight < static_cast<i32>(state.pointLights.size())) {
+
+            ImGui::Separator();
+            PointLight& pl = state.pointLights[state.selectedPointLight];
+
+            ImGui::DragFloat3("Position##pl", &pl.position.x, 0.1f);
+            ImGui::ColorEdit3("Color##pl", &pl.color.x);
+            ImGui::DragFloat("Intensity", &pl.intensity, 0.1f, 0.0f, 100.0f);
+            ImGui::DragFloat("Radius", &pl.radius, 0.1f, 0.1f, 100.0f);
+
+            ImGui::Separator();
+
+            // Presets
+            if (ImGui::Button("Warm")) {
+                pl.color = glm::vec3(1.0f, 0.8f, 0.5f);
+                pl.intensity = 5.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Cool")) {
+                pl.color = glm::vec3(0.5f, 0.7f, 1.0f);
+                pl.intensity = 5.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Red")) {
+                pl.color = glm::vec3(1.0f, 0.1f, 0.1f);
+                pl.intensity = 8.0f;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Green")) {
+                pl.color = glm::vec3(0.1f, 1.0f, 0.2f);
+                pl.intensity = 8.0f;
+            }
+
+            if (ImGui::Button("Delete Light")) {
+                state.pointLights.erase(state.pointLights.begin() + state.selectedPointLight);
+                state.selectedPointLight = -1;
+            }
         }
     }
 

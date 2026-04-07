@@ -274,8 +274,26 @@ void Renderer::createScene() {
     farTorus.textureIndex  = 1;
     m_objects.push_back(farTorus);
 
-    Logger::info("Scene created ({} objects, {} meshes, {} textures)",
-                 m_objects.size(), m_meshes.size(), m_textures.size());
+    // Default point lights
+    PointLight warm;
+    warm.name      = "Warm Light";
+    warm.position  = { -2.0f, 3.0f, 2.0f };
+    warm.color     = { 1.0f, 0.8f, 0.5f };
+    warm.intensity = 8.0f;
+    warm.radius    = 15.0f;
+    m_imguiState.pointLights.push_back(warm);
+
+    PointLight cool;
+    cool.name      = "Cool Light";
+    cool.position  = { 3.0f, 2.0f, -1.0f };
+    cool.color     = { 0.5f, 0.7f, 1.0f };
+    cool.intensity = 6.0f;
+    cool.radius    = 12.0f;
+    m_imguiState.pointLights.push_back(cool);
+
+    Logger::info("Scene created ({} objects, {} meshes, {} textures, {} point lights)",
+                 m_objects.size(), m_meshes.size(), m_textures.size(),
+                 m_imguiState.pointLights.size());
 }
 
 void Renderer::drawFrame() {
@@ -506,6 +524,19 @@ void Renderer::updateUniformBuffer(u32 frameIndex) {
     light.lightColor      = m_imguiState.lightColor;
     light.viewPos         = m_camera.getPosition();
     light.ambientStrength = m_imguiState.ambientStrength;
+
+    // Pack point lights
+    u32 count = static_cast<u32>(std::min(
+        m_imguiState.pointLights.size(), static_cast<size_t>(MAX_POINT_LIGHTS)));
+    light.pointLightCount = count;
+    for (u32 i = 0; i < count; i++) {
+        const auto& pl = m_imguiState.pointLights[i];
+        light.pointLights[i].position  = pl.position;
+        light.pointLights[i].radius    = pl.radius;
+        light.pointLights[i].color     = pl.color;
+        light.pointLights[i].intensity = pl.intensity;
+    }
+
     memcpy(m_lightBuffers[frameIndex].mapped, &light, sizeof(light));
 }
 

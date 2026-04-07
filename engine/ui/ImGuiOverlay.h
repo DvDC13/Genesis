@@ -13,11 +13,24 @@ struct GLFWwindow;
 
 namespace Genesis {
 
+// Point light (UI-side)
+struct PointLight {
+    glm::vec3 position  = glm::vec3(0.0f, 2.0f, 0.0f);
+    f32       radius    = 10.0f;
+    glm::vec3 color     = glm::vec3(1.0f, 1.0f, 1.0f);
+    f32       intensity = 5.0f;
+    std::string name    = "Point Light";
+};
+
 struct ImGuiState {
-    // Lighting controls
+    // Directional light controls
     glm::vec3 lightDir        = glm::normalize(glm::vec3(1.0f, 1.0f, 0.5f));
     glm::vec3 lightColor      = glm::vec3(1.0f, 1.0f, 1.0f);
     f32       ambientStrength  = 0.15f;
+
+    // Point lights
+    std::vector<PointLight> pointLights;
+    i32 selectedPointLight = -1; // -1 = none
 
     // Scene info
     f32 fps            = 0.0f;

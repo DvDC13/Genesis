@@ -33,14 +33,29 @@ struct ViewProjUBO {
     glm::mat4 lightSpaceMatrix;  // Light's VP matrix for shadow mapping
 };
 
+// Point light data (std140-compatible: 32 bytes each)
+struct PointLightData {
+    glm::vec3 position;
+    float     radius;      // attenuation radius
+    glm::vec3 color;
+    float     intensity;
+};
+
+static constexpr u32 MAX_POINT_LIGHTS = 8;
+
 // Lighting data — sent to the fragment shader every frame
 struct LightUBO {
+    // Directional light
     glm::vec3 lightDir;
     float     _pad0;
     glm::vec3 lightColor;
     float     _pad1;
     glm::vec3 viewPos;
     float     ambientStrength;
+    // Point lights
+    u32       pointLightCount;
+    float     _pad2[3];
+    PointLightData pointLights[MAX_POINT_LIGHTS]; // 8 × 32 = 256 bytes
 };
 
 class Renderer {
